@@ -43,3 +43,16 @@ add_test(NAME streaming_zip COMMAND test_streaming_zip)
 add_executable(test_resume_sidecar test_resume_sidecar.cpp)
 target_link_libraries(test_resume_sidecar PRIVATE ltr_core)
 add_test(NAME resume_sidecar COMMAND test_resume_sidecar)
+
+# V1.1.10 — Sprint UI Layout System : DSL HBox/VBox + breakpoints + cache.
+add_executable(test_layout_box test_layout_box.cpp)
+target_link_libraries(test_layout_box PRIVATE ltr_ui)
+add_test(NAME layout_box COMMAND test_layout_box)
+
+add_executable(test_breakpoint test_breakpoint.cpp)
+target_link_libraries(test_breakpoint PRIVATE ltr_ui)
+add_test(NAME breakpoint COMMAND test_breakpoint)
+
+add_executable(test_label_ellipsis test_label_ellipsis.cpp)
+target_link_libraries(test_label_ellipsis PRIVATE ltr_ui)
+add_test(NAME label_ellipsis COMMAND test_label_ellipsis)

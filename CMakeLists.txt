@@ -194,6 +194,11 @@ add_library(ltr_ui STATIC
     src/ui/ui_app.cpp
     src/ui/rounded_rect.cpp
     src/ui/icon_library.cpp
+    # V1.1.10 — Sprint UI Layout System
+    src/ui/clip_scope.cpp
+    src/ui/layout.cpp
+    src/ui/animation.cpp
+    src/ui/dpi.cpp
     src/ui/widgets/button.cpp
     src/ui/widgets/dropdown_menu.cpp
     src/ui/widgets/label.cpp
