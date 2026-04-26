@@ -186,9 +186,12 @@ void SharePanel::drawExpanded(sf::RenderTarget& target) const {
 
     Label urlText;
     const std::string displayUrl = url_.empty() ? "\xE2\x80\x94" : url_;
+    const float urlMaxW = bounds_.width - 2 * Spacing::lg;
     urlText.setText(displayUrl)
            .setBold(true).setSize(FontSize::body)
            .setColor(Colors::text)
+           .setMaxWidth(urlMaxW)
+           .setEllipsis(true)
            .setPosition(bounds_.left + Spacing::lg, urlY + 16.f);
     urlText.draw(target);
 

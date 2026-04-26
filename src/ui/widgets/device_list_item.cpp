@@ -1,5 +1,6 @@
 #include "ltr/ui/widgets/device_list_item.hpp"
 
+#include "ltr/ui/layout.hpp"
 #include "ltr/ui/rounded_rect.hpp"
 #include "ltr/ui/theme.hpp"
 #include "ltr/ui/widgets/label.hpp"
@@ -7,6 +8,13 @@
 #include <SFML/Graphics/CircleShape.hpp>
 
 namespace ltr::ui {
+
+namespace {
+constexpr float kStatusDotSize = 12.f;
+constexpr float kPillW         = 46.f;
+constexpr float kPillH         = 18.f;
+constexpr float kCheckRadius   = 10.f;
+} // namespace
 
 void DeviceListItem::handleEvent(const sf::Event& e) {
     if (e.type == sf::Event::MouseMoved) {
@@ -38,88 +46,98 @@ void DeviceListItem::draw(sf::RenderTarget& target) const {
         rr.draw(target);
     }
 
-    // Pastille de statut (en ligne, à gauche).
-    const float dotR = 6.f;
-    const float dotX = inner.left + Spacing::md + dotR;
-    const float dotY = inner.top  + inner.height / 2.f;
-    sf::CircleShape dot(dotR);
-    dot.setOrigin(dotR, dotR);
-    dot.setPosition(dotX, dotY);
-    dot.setFillColor(Colors::success);
-    target.draw(dot);
-
-    // Nom + plateforme / IP.
-    Label name;
-    name.setText(device_.name.empty() ? "(sans nom)" : device_.name)
-        .setSize(FontSize::body)
-        .setBold(true)
-        .setColor(Colors::text)
-        .setPosition(dotX + dotR + 10.f, inner.top + 8.f);
-    name.draw(target);
-
-    const std::string ipStr = device_.ip.toString();
-    const bool hasPlatform  = !device_.platform.empty();
-    const bool hasIp        = !ipStr.empty() && ipStr != "0.0.0.0";
-
-    std::string subText;
-    if (hasPlatform && hasIp)       subText = device_.platform + "  ·  " + ipStr;
-    else if (hasPlatform)           subText = device_.platform;
-    else if (hasIp)                 subText = ipStr;
-
-    if (!subText.empty()) {
-        Label sub;
-        sub.setText(subText)
-           .setSize(FontSize::small)
-           .setColor(Colors::textSecondary)
-           .setPosition(dotX + dotR + 10.f, inner.top + 28.f);
-        sub.draw(target);
-    }
-
-    // Checkbox ronde à droite.
-    const float chkR = 10.f;
-    const float chkX = inner.left + inner.width - Spacing::md - chkR;
-    const float chkY = dotY;
-
-    // V1.1.8-UX1 : pill « Web » ou « Local » à gauche de la checkbox.
-    // Symétrie visuelle : tous les peers ont un pill indiquant le canal.
-    {
-        const std::string pillLabel =
-            (device_.kind == domain::PeerKind::Web) ? "Web" : "Local";
-        constexpr float pillW = 46.f;
-        constexpr float pillH = 18.f;
-        const float pillRight = chkX - chkR - Spacing::md;
-        const float pillLeft  = pillRight - pillW;
-        const float pillTop   = chkY - pillH / 2.f;
-
-        RoundedRect pill(pillLeft, pillTop, pillW, pillH, Radius::pill);
-        pill.setFillColor(Colors::accentLight);
-        pill.draw(target);
-
-        Label pillText;
-        pillText.setText(pillLabel)
+    // Layout via HBox :
+    //   [pastille verte 12] [nom + sub] [pill Web/Local] [checkbox ronde]
+    HBox{}
+        .padding(Spacing::md, 0.f)
+        .spacing(Spacing::md)
+        .fixed(kStatusDotSize, [](sf::RenderTarget& t,
+                                    const sf::FloatRect& r) {
+            const float dotR = kStatusDotSize / 2.f;
+            sf::CircleShape dot(dotR);
+            dot.setOrigin(dotR, dotR);
+            dot.setPosition(r.left + dotR, r.top + r.height / 2.f);
+            dot.setFillColor(Colors::success);
+            t.draw(dot);
+        })
+        .expanded(1, [this](sf::RenderTarget& t,
+                              const sf::FloatRect& r) {
+            // Nom + sous-titre dans un VBox vertical centré.
+            VBox{}
+                .padding(0.f, (r.height - 40.f) / 2.f)
+                .fixed(20.f, [this](sf::RenderTarget& tt,
+                                      const sf::FloatRect& rr) {
+                    Label{}
+                        .setText(device_.name.empty()
+                                 ? std::string{"(sans nom)"}
+                                 : device_.name)
+                        .setSize(FontSize::body)
+                        .setBold(true)
+                        .setColor(Colors::text)
+                        .setBounds(rr)
+                        .setMaxWidth(rr.width)
+                        .setEllipsis(true)
+                        .draw(tt);
+                })
+                .fixed(18.f, [this](sf::RenderTarget& tt,
+                                      const sf::FloatRect& rr) {
+                    const std::string ipStr = device_.ip.toString();
+                    const bool hasPlatform = !device_.platform.empty();
+                    const bool hasIp = !ipStr.empty() && ipStr != "0.0.0.0";
+                    std::string sub;
+                    if (hasPlatform && hasIp) sub = device_.platform + "  \xC2\xB7  " + ipStr;
+                    else if (hasPlatform)     sub = device_.platform;
+                    else if (hasIp)           sub = ipStr;
+                    if (sub.empty()) return;
+                    Label{}
+                        .setText(sub)
+                        .setSize(FontSize::small)
+                        .setColor(Colors::textSecondary)
+                        .setBounds(rr)
+                        .setMaxWidth(rr.width)
+                        .setEllipsis(true)
+                        .draw(tt);
+                })
+                .layout(r, t);
+        })
+        .fixed(kPillW, [this](sf::RenderTarget& t,
+                                const sf::FloatRect& r) {
+            const std::string label =
+                (device_.kind == domain::PeerKind::Web) ? "Web" : "Local";
+            const float pillY = r.top + (r.height - kPillH) / 2.f;
+            RoundedRect pill(r.left, pillY, kPillW, kPillH, Radius::pill);
+            pill.setFillColor(Colors::accentLight).draw(t);
+            Label{}
+                .setText(label)
                 .setBold(true).setSize(FontSize::overline)
-                .setColor(Colors::accent);
-        const auto m = pillText.measure();
-        pillText.setPosition(pillLeft + (pillW - m.x) / 2.f,
-                             pillTop  + (pillH - m.y) / 2.f - 2.f);
-        pillText.draw(target);
-    }
+                .setColor(Colors::accent)
+                .setBounds({r.left, pillY, kPillW, kPillH})
+                .setAlignment(Label::Alignment::Center)
+                .draw(t);
+        })
+        .fixed(kCheckRadius * 2 + Spacing::sm,
+               [this](sf::RenderTarget& t, const sf::FloatRect& r) {
+            const float chkX = r.left + r.width - kCheckRadius;
+            const float chkY = r.top + r.height / 2.f;
+            sf::CircleShape chk(kCheckRadius);
+            chk.setOrigin(kCheckRadius, kCheckRadius);
+            chk.setPosition(chkX, chkY);
+            chk.setFillColor(selected_ ? Colors::accent
+                                          : sf::Color::Transparent);
+            chk.setOutlineColor(selected_ ? Colors::accent
+                                           : Colors::textSecondary);
+            chk.setOutlineThickness(1.5f);
+            t.draw(chk);
 
-    sf::CircleShape chk(chkR);
-    chk.setOrigin(chkR, chkR);
-    chk.setPosition(chkX, chkY);
-    chk.setFillColor(selected_ ? Colors::accent : sf::Color::Transparent);
-    chk.setOutlineColor(selected_ ? Colors::accent : Colors::textSecondary);
-    chk.setOutlineThickness(1.5f);
-    target.draw(chk);
-
-    if (selected_) {
-        sf::CircleShape inner_dot(3.5f);
-        inner_dot.setOrigin(3.5f, 3.5f);
-        inner_dot.setPosition(chkX, chkY);
-        inner_dot.setFillColor(sf::Color::White);
-        target.draw(inner_dot);
-    }
+            if (selected_) {
+                sf::CircleShape inner(3.5f);
+                inner.setOrigin(3.5f, 3.5f);
+                inner.setPosition(chkX, chkY);
+                inner.setFillColor(sf::Color::White);
+                t.draw(inner);
+            }
+        })
+        .layout(inner, target);
 }
 
 } // namespace ltr::ui
