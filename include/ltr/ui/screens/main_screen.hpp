@@ -6,9 +6,11 @@
 #include <SFML/Window/Event.hpp>
 
 #include "ltr/app/app_controller.hpp"
+#include "ltr/ui/breakpoint.hpp"
 #include "ltr/ui/screen.hpp"
 #include "ltr/ui/widgets/button.hpp"
 #include "ltr/ui/widgets/dropdown_menu.hpp"
+#include "ltr/ui/widgets/scroll_area.hpp"
 #include "ltr/ui/widgets/share_panel.hpp"
 #include "ltr/ui/widgets/text_input.hpp"
 
@@ -61,6 +63,8 @@ private:
     sf::FloatRect transfersResumeAllRect() const;
     // V1.1.9-batch : badge inbox web dans le header (vide si count==0)
     sf::FloatRect inboxBadgeRect() const;
+    // V1.1.10 : bouton hamburger ☰ dans le header (Compact mode uniquement)
+    sf::FloatRect hamburgerRect() const;
 
     app::AppController& controller_;
     sf::Vector2u        viewSize_{960, 600};
@@ -107,6 +111,11 @@ private:
     // largeur totale du contenu et le clamper au prochain event.
     float         transfersScrollX_{0.f};
     mutable float transfersContentW_{0.f};
+
+    // V1.1.10 — Sprint UI Layout System
+    Breakpoint    breakpoint_{Breakpoint::Regular};
+    bool          compactSidebarOpen_{false};
+    mutable ScrollArea peersScroll_;
 
     // V1.1.8-UX3 : drag OS en cours au-dessus de la fenêtre.
     bool          dragOver_{false};

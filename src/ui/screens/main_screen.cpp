@@ -1,6 +1,8 @@
 #include "ltr/ui/screens/main_screen.hpp"
 
 #include "ltr/core/format.hpp"
+#include "ltr/ui/breakpoint.hpp"
+#include "ltr/ui/clip_scope.hpp"
 #include "ltr/ui/icon_library.hpp"
 #include "ltr/ui/rounded_rect.hpp"
 #include "ltr/ui/theme.hpp"
@@ -107,13 +109,20 @@ void MainScreen::rebuildLayout() {
     const float w = static_cast<float>(viewSize_.x);
     const float h = static_cast<float>(viewSize_.y);
 
+    // V1.1.10 — Breakpoint responsive.
+    breakpoint_ = detectBreakpoint(viewSize_.x);
+    const auto m = metricsFor(breakpoint_);
+    const float sidebarW =
+        (breakpoint_ == Breakpoint::Compact && !compactSidebarOpen_)
+            ? 0.f : m.sidebarW;
+
     headerRect_     = {0.f, 0.f, w, kHeaderH};
-    sidebarRect_    = {0.f, kHeaderH, kSidebarW, h - kHeaderH - kBottomH};
+    sidebarRect_    = {0.f, kHeaderH, sidebarW, h - kHeaderH - kBottomH};
     const float spW = sharePanelWidth();
     sharePanelRect_ = {w - spW, kHeaderH,
                        spW, h - kHeaderH - kBottomH};
-    centerRect_     = {kSidebarW, kHeaderH,
-                       w - kSidebarW - spW,
+    centerRect_     = {sidebarW, kHeaderH,
+                       w - sidebarW - spW,
                        h - kHeaderH - kBottomH};
     bottomRect_     = {0.f, h - kBottomH, w, kBottomH};
 
@@ -242,6 +251,13 @@ void MainScreen::handleEvent(const sf::Event& e, const app::AppState& state) {
         if (!state.webInbox.empty() &&
             inboxBadgeRect().contains(mx, my)) {
             controller_.toggleWebInboxModal();
+            return;
+        }
+        // V1.1.10 : clic sur hamburger ☰ (Compact mode) → toggle sidebar.
+        if (breakpoint_ == Breakpoint::Compact
+            && hamburgerRect().contains(mx, my)) {
+            compactSidebarOpen_ = !compactSidebarOpen_;
+            rebuildLayout();
             return;
         }
 
@@ -389,12 +405,31 @@ void MainScreen::update(const app::AppState& state, sf::Time dt) {
 
 void MainScreen::draw(sf::RenderTarget& target) const {
     drawBackground(target);
-    drawHeader(target);
-    drawSidebar(target);
-    drawCenter(target);
-    sharePanel_.draw(target);
-    drawTransferBar(target);
-    // V1.1.8-UX1 : le menu est dessiné en DERNIER pour passer par-dessus tout.
+
+    // V1.1.10 — ClipScope par zone garantit qu'aucun dessin ne déborde.
+    {
+        ClipScope clip(target, headerRect_);
+        drawHeader(target);
+    }
+    if (sidebarRect_.width > 0.f) {
+        ClipScope clip(target, sidebarRect_);
+        drawSidebar(target);
+    }
+    {
+        ClipScope clip(target, centerRect_);
+        drawCenter(target);
+    }
+    {
+        ClipScope clip(target, sharePanelRect_);
+        sharePanel_.draw(target);
+    }
+    {
+        ClipScope clip(target, bottomRect_);
+        drawTransferBar(target);
+    }
+
+    // V1.1.8-UX1 : le menu est dessiné en DERNIER pour passer par-dessus tout
+    // (PAS de ClipScope — il doit pouvoir déborder de la zone centrale).
     addMenu_.draw(target);
 }
 
@@ -410,8 +445,24 @@ void MainScreen::drawHeader(sf::RenderTarget& target) const {
 
     Card{}.setBounds(headerRect_).setColor(Colors::surface).draw(target);
 
-    // Point indigo décoratif + titre.
-    {
+    // V1.1.10 : bouton ☰ hamburger en Compact mode (à gauche, avant le titre).
+    float titleX = Spacing::xl;
+    if (breakpoint_ == Breakpoint::Compact) {
+        const auto h = hamburgerRect();
+        RoundedRect bg(h.left, h.top, h.width, h.height, Radius::sm);
+        bg.setFillColor(compactSidebarOpen_ ? Colors::accentLight
+                                                : Colors::surface);
+        bg.draw(target);
+        // 3 traits horizontaux pour le pictogramme ☰
+        for (int i = 0; i < 3; ++i) {
+            RoundedRect bar(h.left + 8.f, h.top + 9.f + i * 6.f,
+                            h.width - 16.f, 2.f, 1.f);
+            bar.setFillColor(Colors::text);
+            bar.draw(target);
+        }
+        titleX = h.left + h.width + Spacing::md + 12.f;
+    } else {
+        // Point indigo décoratif (mode Regular/Large)
         RoundedRect dot(Spacing::xl, (kHeaderH - 10) / 2.f, 10.f, 10.f, 5.f);
         dot.setFillColor(Colors::accent).draw(target);
     }
@@ -420,7 +471,8 @@ void MainScreen::drawHeader(sf::RenderTarget& target) const {
     title.setText("LocalTransfer")
          .setBold(true).setSize(FontSize::h1)
          .setColor(Colors::text)
-         .setPosition(Spacing::xl + 22.f, (kHeaderH - FontSize::h1) / 2.f - 4.f);
+         .setPosition(titleX + (breakpoint_ == Breakpoint::Compact ? 0.f : 22.f),
+                       (kHeaderH - FontSize::h1) / 2.f - 4.f);
     title.draw(target);
 
     // Pill indiquant l'appareil courant (droite).
@@ -740,9 +792,12 @@ constexpr float kTBtnResumeAllW = 140.f;
 } // namespace
 
 float MainScreen::sharePanelWidth() const {
-    return controller_.isSharePanelCollapsed()
-        ? kSharePanelCollapsedW
-        : kSharePanelExpandedW;
+    const auto m = metricsFor(breakpoint_);
+    // V1.1.10 : Compact force le SharePanel à l'état collapsed
+    // (économie d'espace écran).
+    const bool collapsed = controller_.isSharePanelCollapsed()
+                            || m.forceSharePanelCollapsed;
+    return collapsed ? kSharePanelCollapsedW : m.sharePanelExpandedW;
 }
 
 float MainScreen::transfersZoneLeft() const {
@@ -794,6 +849,12 @@ sf::FloatRect MainScreen::transfersIgnoreBtnRect(std::size_t i) const {
             r.top + Spacing::xs + kTBtnH + Spacing::xs,
             kTBtnIgnoreW, kTBtnH};
 }
+sf::FloatRect MainScreen::hamburgerRect() const {
+    // Bouton ☰ visible uniquement en Compact mode, à gauche du titre.
+    constexpr float kSize = 32.f;
+    return {Spacing::xl, (kHeaderH - kSize) / 2.f, kSize, kSize};
+}
+
 sf::FloatRect MainScreen::inboxBadgeRect() const {
     // Approximation grossière : zone à gauche de la pill selfName de
     // ~150 px. Le rendu réel calcule la largeur précise selon le label.

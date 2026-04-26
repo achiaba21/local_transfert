@@ -208,6 +208,7 @@ add_library(ltr_ui STATIC
     src/ui/widgets/card.cpp
     src/ui/widgets/text_input.cpp
     src/ui/widgets/qr_code_view.cpp
+    src/ui/widgets/scroll_area.cpp
     src/ui/widgets/share_panel.cpp
     src/ui/screens/main_screen.cpp
     src/ui/screens/incoming_offer_screen.cpp
