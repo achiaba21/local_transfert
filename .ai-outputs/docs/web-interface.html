@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LocalTransfer — Interface Web embarquée</title>
+<style>
+  :root {
+    --bg: #FAFAFB;
+    --surface: #FFFFFF;
+    --sidebar: #F1F3F6;
+    --accent: #6366F1;
+    --accent-hover: #4F46E5;
+    --accent-light: #EEF2FF;
+    --text: #0F172A;
+    --text-secondary: #64748B;
+    --separator: #E2E8F0;
+    --success: #10B981;
+    --error: #EF4444;
+    --warning: #F59E0B;
+    --shadow: 0 2px 8px rgba(0, 0, 0, 0.10);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, sans-serif;
+    color: var(--text);
+    background: var(--bg);
+    line-height: 1.6;
+    font-size: 15px;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 56px 32px; }
+
+  header.page-header {
+    border-bottom: 1px solid var(--separator);
+    padding-bottom: 32px;
+    margin-bottom: 48px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .brand-dot { width: 16px; height: 16px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+  .title-block { flex: 1; }
+  h1 { margin: 0 0 4px; font-size: 32px; letter-spacing: -0.02em; }
+  .subtitle { color: var(--text-secondary); font-size: 15px; margin: 0; }
+  .meta { color: var(--text-secondary); font-size: 13px; margin-top: 12px; display: flex; gap: 16px; flex-wrap: wrap; }
+  .meta strong { color: var(--text); }
+
+  .badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .badge.ok { background: #ECFDF5; color: var(--success); border: 1px solid var(--success); }
+  .badge.accent { background: var(--accent-light); color: var(--accent); }
+
+  h2 {
+    margin-top: 56px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--accent);
+    font-size: 22px;
+    letter-spacing: -0.01em;
+  }
+  h3 {
+    margin-top: 32px;
+    font-size: 17px;
+    color: var(--accent);
+  }
+
+  p { margin: 16px 0; }
+  strong { color: var(--text); }
+
+  pre, code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  pre {
+    background: var(--sidebar);
+    padding: 16px 20px;
+    border-radius: 10px;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.55;
+    border: 1px solid var(--separator);
+  }
+  code {
+    background: var(--sidebar);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 13px;
+  }
+  pre code { background: transparent; padding: 0; font-size: inherit; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 14px;
+    background: var(--surface);
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+  th, td {
+    padding: 12px 16px;
+    text-align: left;
+    border-bottom: 1px solid var(--separator);
+  }
+  th {
+    background: var(--sidebar);
+    font-weight: 700;
+    color: var(--text);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: var(--accent-light); }
+
+  .call-out {
+    background: var(--accent-light);
+    border-left: 3px solid var(--accent);
+    padding: 16px 20px;
+    border-radius: 8px;
+    margin: 24px 0;
+  }
+  .call-out.warn { background: #FFFBEB; border-left-color: var(--warning); }
+  .call-out.warn strong { color: var(--warning); }
+
+  ul, ol { padding-left: 24px; }
+  li { margin: 4px 0; }
+
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--separator);
+    border-radius: 10px;
+    padding: 20px 24px;
+    margin: 32px 0;
+  }
+  .toc h3 { margin-top: 0; color: var(--text); font-size: 14px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .toc ol { margin: 0; padding-left: 20px; font-size: 14px; }
+  .toc a { color: var(--accent); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+
+  .link-list { list-style: none; padding: 0; }
+  .link-list li {
+    padding: 12px 16px;
+    background: var(--surface);
+    border: 1px solid var(--separator);
+    border-radius: 8px;
+    margin: 8px 0;
+  }
+  .link-list a { color: var(--accent); text-decoration: none; font-weight: 600; }
+  .link-list a:hover { text-decoration: underline; }
+  .link-list .desc { color: var(--text-secondary); font-size: 13px; margin-top: 4px; }
+
+  footer {
+    margin-top: 72px;
+    padding-top: 32px;
+    border-top: 1px solid var(--separator);
+    color: var(--text-secondary);
+    font-size: 13px;
+  }
+
+  .arch-box {
+    background: var(--surface);
+    border: 1px solid var(--separator);
+    border-radius: 10px;
+    padding: 0;
+    overflow-x: auto;
+  }
+  .arch-box pre {
+    margin: 0;
+    border: none;
+    border-radius: 10px;
+    background: transparent;
+  }
+
+  .port-card {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 20px;
+    background: var(--surface);
+    border: 1px solid var(--separator);
+    border-radius: 10px;
+    margin: 10px 0;
+  }
+  .port-badge {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--accent);
+    min-width: 80px;
+  }
+  .port-tag {
+    background: var(--accent-light); color: var(--accent);
+    padding: 2px 8px; border-radius: 4px;
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+  }
+  .port-desc { flex: 1; color: var(--text-secondary); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="page-header">
+  <div class="brand-dot"></div>
+  <div class="title-block">
+    <h1>Interface Web embarquée</h1>
+    <p class="subtitle">Échange de fichiers LAN via navigateur, sans installation</p>
+  </div>
+  <span class="badge ok">V1.1 livrée · 7/7 tests</span>
+</header>
+
+<p class="meta">
+  <span><strong>Feature</strong> : web-interface</span>
+  <span><strong>Projet</strong> : LocalTransfer</span>
+  <span><strong>Date</strong> : 2026-04-22</span>
+  <span><strong>Statut</strong> : Production-ready</span>
+</p>
+
+<div class="toc">
+  <h3>Sommaire</h3>
+  <ol>
+    <li><a href="#vue-ensemble">Vue d'ensemble</a></li>
+    <li><a href="#probleme">Problème résolu &amp; valeur</a></li>
+    <li><a href="#architecture">Architecture haute-niveau</a></li>
+    <li><a href="#ports">Ports réseau</a></li>
+    <li><a href="#endpoints">Endpoints HTTP</a></li>
+    <li><a href="#flux">Flux typiques</a></li>
+    <li><a href="#auto-propagation">Auto-propagation du binaire</a></li>
+    <li><a href="#ui">Interfaces utilisateur</a></li>
+    <li><a href="#securite">Sécurité &amp; limites V1</a></li>
+    <li><a href="#docs">Documents liés</a></li>
+    <li><a href="#changelog">Changelog</a></li>
+  </ol>
+</div>
+
+<!-- ==================== 1. VUE D'ENSEMBLE ==================== -->
+<h2 id="vue-ensemble">1. Vue d'ensemble</h2>
+
+<p>
+  L'<strong>interface web embarquée</strong> ajoute à LocalTransfer un serveur
+  HTTP interne (<strong>port 45456</strong>). Depuis le même réseau local,
+  n'importe quel appareil (mobile, tablette, laptop, quel que soit l'OS)
+  peut ouvrir une URL dans son navigateur et échanger des fichiers
+  <strong>bidirectionnellement</strong> avec le host&nbsp;—&nbsp;
+  <strong>sans installation</strong>.
+</p>
+
+<p>
+  Les sessions navigateur authentifiées deviennent des « pairs » dans l'app
+  desktop, au même niveau que les apps natives, dans une <strong>liste
+  unifiée</strong>. L'utilisateur voit tout le monde au même endroit et peut
+  envoyer indifféremment vers un pair natif ou vers un navigateur.
+</p>
+
+<div class="call-out">
+  <strong>💡 En une phrase</strong> :<br>
+  « Le host imprime un QR code + PIN dans sa fenêtre LocalTransfer. Les
+  invités scannent, saisissent le PIN une fois, puis échangent des fichiers
+  dans leur navigateur. »
+</div>
+
+<!-- ==================== 2. PROBLÈME RÉSOLU ==================== -->
+<h2 id="probleme">2. Problème résolu &amp; valeur apportée</h2>
+
+<h3>Avant</h3>
+<ul>
+  <li>Les <strong>pare-feux OS</strong> (macOS, Windows Defender) bloquent
+    souvent les connexions TCP entrantes des apps non signées → découverte
+    <em>non symétrique</em> entre 2 apps natives (A voit B, B ne voit pas A).</li>
+  <li>Un utilisateur qui veut <strong>envoyer un seul fichier</strong> doit
+    quand même installer toute l'app.</li>
+  <li>Les appareils <strong>iOS / Android</strong> n'avaient pas d'accès
+    à LocalTransfer.</li>
+</ul>
+
+<h3>Après</h3>
+<ul>
+  <li>1 seule permission pare-feu à accorder (côté host, pour le port
+    45456) &mdash; côté visiteur, <strong>le navigateur est déjà autorisé</strong>.</li>
+  <li>Depuis iOS, Android, ou n'importe quel navigateur : <strong>zéro
+    install</strong> pour échanger.</li>
+  <li>Auto-propagation : si le visiteur est sur le même OS que le host, il
+    peut <strong>télécharger l'app native</strong> directement (Windows
+    <code>.exe</code>, macOS <code>.app</code>, Linux ELF).</li>
+</ul>
+
+<!-- ==================== 3. ARCHITECTURE ==================== -->
+<h2 id="architecture">3. Architecture haute-niveau</h2>
+
+<p>
+  La couche <code>ltr::web</code> est <strong>sœur</strong> de <code>ltr::network</code>
+  &mdash; elle coexiste sans toucher au protocole TCP natif (LTR1) existant.
+</p>
+
+<div class="arch-box">
+<pre><code>┌──────────────────────────────────────────────────────────────┐
+│  UI (SFML) — ltr::ui                                         │
+│    MainScreen : Sidebar | Centre | SharePanel (NEW)          │
+│    DeviceListItem avec pill "Web" pour kind=PeerKind::Web    │
+├──────────────────────────────────────────────────────────────┤
+│  App — ltr::app                                              │
+│    AppController::requestSend() dispatche selon peer.kind :  │
+│       Native → TransferClient  (TCP LTR1, existant)          │
+│       Web    → WebService::pushFiles (tickets + SSE)         │
+├──────────────────┬────────────────────┬──────────────────────┤
+│  Network         │  Web (nouveau)     │  Infra               │
+│  (inchangé)      │                    │                      │
+│  DiscoveryService│  HttpServer        │  Config              │
+│  TransferServer  │  WebService        │  FilesystemService   │
+│  TransferClient  │  WebSessionStore   │  HashService         │
+│  Protocol LTR1   │  DownloadTicketStore                      │
+│                  │  SseBroadcaster    │                      │
+│                  │  SelfBinary (OS)   │                      │
+│                  │  QrCode            │                      │
+├──────────────────┴────────────────────┴──────────────────────┤
+│  Domain — Device{kind=Native|Web, sessionToken}              │
+│  Core   — EventBus (std::variant) — flux événements unifié  │
+└──────────────────────────────────────────────────────────────┘</code></pre>
+</div>
+
+<p>
+  <strong>Invariant architectural</strong> : aucun nouveau type d'événement
+  dans <code>core::EventBus</code>. Les sessions web réutilisent intégralement
+  les événements existants (<code>PeerSeenEvent</code>,
+  <code>IncomingOfferEvent</code>, <code>TransferProgressEvent</code>, etc.).
+  L'UI desktop traite les pairs web sans modification logique — seule
+  l'icône pill « Web » est ajoutée pour différencier visuellement.
+</p>
+
+<!-- ==================== 4. PORTS RÉSEAU ==================== -->
+<h2 id="ports">4. Ports réseau</h2>
+
+<div class="port-card">
+  <span class="port-badge">45454</span>
+  <span class="port-tag">UDP</span>
+  <span class="port-desc">Discovery beacon natif (broadcast 255.255.255.255) — <strong>inchangé</strong></span>
+</div>
+<div class="port-card">
+  <span class="port-badge">45455</span>
+  <span class="port-tag">TCP</span>
+  <span class="port-desc">Protocole <code>LTR1</code> natif (offer/accept/chunks) — <strong>inchangé</strong></span>
+</div>
+<div class="port-card">
+  <span class="port-badge">45456</span>
+  <span class="port-tag">HTTP</span>
+  <span class="port-desc"><strong>NOUVEAU</strong> — serveur web. Fallback automatique sur 45457–45466 si occupé.</span>
+</div>
+
+<!-- ==================== 5. ENDPOINTS HTTP ==================== -->
+<h2 id="endpoints">5. Endpoints HTTP exposés</h2>
+
+<table>
+<thead>
+  <tr>
+    <th>Méthode</th>
+    <th>Route</th>
+    <th>Auth</th>
+    <th>Description</th>
+  </tr>
+</thead>
+<tbody>
+  <tr>
+    <td><code>GET</code></td>
+    <td><code>/</code></td>
+    <td>non</td>
+    <td>Page d'accueil (index.html embarqué dans le binaire)</td>
+  </tr>
+  <tr>
+    <td><code>GET</code></td>
+    <td><code>/app.js</code>, <code>/style.css</code>, <code>/icons/*.svg</code></td>
+    <td>non</td>
+    <td>Assets statiques embarqués</td>
+  </tr>
+  <tr>
+    <td><code>GET</code></td>
+    <td><code>/api/host-info</code></td>
+    <td>non</td>
+    <td>Nom du host, plateforme, URL de téléchargement binaire</td>
+  </tr>
+  <tr>
+    <td><code>POST</code></td>
+    <td><code>/api/auth</code></td>
+    <td>PIN</td>
+    <td>Vérifie le PIN 6 chiffres, ouvre une session, retourne un cookie <code>ltr_token</code></td>
+  </tr>
+  <tr>
+    <td><code>GET</code></td>
+    <td><code>/api/me</code></td>
+    <td>cookie</td>
+    <td>Whoami — infos sur la session courante</td>
+  </tr>
+  <tr>
+    <td><code>POST</code></td>
+    <td><code>/api/upload</code></td>
+    <td>cookie</td>
+    <td>Upload multipart vers le host. Émet les events UI (progress, done, failed)</td>
+  </tr>
+  <tr>
+    <td><code>GET</code></td>
+    <td><code>/api/events</code></td>
+    <td>cookie</td>
+    <td>Server-Sent Events long-lived (host→browser)</td>
+  </tr>
+  <tr>
+    <td><code>GET</code></td>
+    <td><code>/api/download/:ticketId</code></td>
+    <td>cookie</td>
+    <td>Stream d'un fichier via ticket one-shot (host→browser)</td>
+  </tr>
+  <tr>
+    <td><code>GET</code></td>
+    <td><code>/download/self</code></td>
+    <td>non</td>
+    <td>Binaire natif de l'app courante (voir §7 Auto-propagation)</td>
+  </tr>
+</tbody>
+</table>
+
+<!-- ==================== 6. FLUX TYPIQUES ==================== -->
+<h2 id="flux">6. Flux typiques</h2>
+
+<h3>Flux A — Visiteur envoie un fichier au host</h3>
+<pre><code>Navigateur visiteur              Serveur HTTP               EventBus → UI Desktop
+────────────────────             ─────────────              ─────────────────────
+GET /              ────────────> index.html (embarqué)
+POST /api/auth {pin}            → WebSessionStore
+<──── Set-Cookie ltr_token         PeerSeenEvent(kind=Web) → visible dans la sidebar
+GET /api/events  ───────────────> SseBroadcaster::attach
+                                   (long-poll ouvert)
+POST /api/upload (multipart)    → upload_routes.cpp
+                                   écrit dans downloadDir   → IncomingOfferEvent
+                                                            → TransferStartedEvent
+                                                            → TransferProgressEvent
+                                                            → TransferDoneEvent
+&lt;──── 200 {sessionId, bytes}</code></pre>
+
+<h3>Flux B — Host envoie un fichier à un visiteur web</h3>
+<pre><code>UI Desktop                      WebService                  Navigateur visiteur
+───────────                     ──────────                  ───────────────────
+[clic Envoyer]
+requestSend() détecte
+ peer.kind == Web
+ → pushFiles(token, sid, files)
+                                 issue DownloadTicket × N
+                                 post TransferStartedEvent
+                                 SSE "files-offer" ──────> [JS affiche la liste]
+                                                             GET /api/download/:ticketId
+                                                             ────────────────────────>
+                                 consume ticket (atomique)
+                                 stream chunks 256 KB      ─────> [download navigateur]
+                                 TransferProgressEvent × N
+                                 TransferDoneEvent (EOF)</code></pre>
+
+<!-- ==================== 7. AUTO-PROPAGATION ==================== -->
+<h2 id="auto-propagation">7. Auto-propagation du binaire natif</h2>
+
+<p>
+  Chaque host sert <strong>sa propre version</strong> du binaire natif.
+  Pas de bundle cross-OS &mdash; logique virale par-OS : un Mac propage un Mac,
+  un Windows propage un Windows. Pour les cas cross-OS, la page web
+  propose un lien vers GitHub Releases.
+</p>
+
+<table>
+<thead>
+  <tr>
+    <th>OS du host</th>
+    <th>Contenu servi</th>
+    <th>Mécanisme</th>
+    <th>Content-Type</th>
+  </tr>
+</thead>
+<tbody>
+  <tr>
+    <td>Windows</td>
+    <td><code>LocalTransfer-Windows.exe</code></td>
+    <td><code>GetModuleFileNameW</code> sur le process courant</td>
+    <td><code>application/vnd.microsoft.portable-executable</code></td>
+  </tr>
+  <tr>
+    <td>Linux</td>
+    <td><code>LocalTransfer-Linux</code> (binaire ELF)</td>
+    <td><code>readlink /proc/self/exe</code></td>
+    <td><code>application/octet-stream</code></td>
+  </tr>
+  <tr>
+    <td>macOS</td>
+    <td><code>LocalTransfer-macOS.zip</code></td>
+    <td>Zip du <code>.app</code> bundle via <strong>miniz</strong> (recursive)</td>
+    <td><code>application/zip</code></td>
+  </tr>
+</tbody>
+</table>
+
+<div class="call-out warn">
+  <strong>⚠️ Sécurité — prérequis V2</strong> : l'auto-propagation n'est
+  sûre qu'avec <strong>signature des binaires</strong> (Apple Developer ID
+  pour macOS, Authenticode pour Windows). Sans signature, un attaquant
+  sur le LAN pourrait distribuer une version trojanisée. À régler avant
+  release publique — non bloquant en V1 (usage contrôlé).
+</div>
+
+<!-- ==================== 8. UI ==================== -->
+<h2 id="ui">8. Interfaces utilisateur</h2>
+
+<h3>Page web — État « auth »</h3>
+<pre><code>┌──────────────────────────────────────────────────────┐
+│ ● LocalTransfer                 [Mac de Serge]      │
+├──────────────────────────────────────────────────────┤
+│                                                      │
+│       ┌────────────────────────────────┐             │
+│       │  Entrez le code d'accès        │             │
+│       │                                │             │
+│       │    ┌─┬─┬─┬─┬─┬─┐               │             │
+│       │    │ │ │ │ │ │ │  ← 6 cases    │             │
+│       │    └─┴─┴─┴─┴─┴─┘               │             │
+│       │                                │             │
+│       │  Affiché sur "Mac de Serge"    │             │
+│       │                                │             │
+│       │       [  Se connecter  ]       │             │
+│       └────────────────────────────────┘             │
+│                                                      │
+└──────────────────────────────────────────────────────┘</code></pre>
+
+<h3>Page web — État « principal » (desktop ≥ 720 px)</h3>
+<pre><code>┌──────────────────────────────────────────────────────┐
+│ ● LocalTransfer                 [Mac de Serge]      │
+├──────────────────────────────────────────────────────┤
+│  ┌────────────────────────────────────────────────┐ │
+│  │ 📱 Installer l'app macOS             [×]       │ │
+│  │                             [Installer]        │ │
+│  └────────────────────────────────────────────────┘ │
+│                                                      │
+│  ┌──────────────────┐   ┌──────────────────────┐    │
+│  │  ENVOYER         │   │  REÇUS DU HOST · 2  │    │
+│  │                  │   │                      │    │
+│  │  Déposez ici     │   │  📄 rapport.pdf  ⬇ │    │
+│  │        ⬆         │   │  🎵 song.mp3     ⬇ │    │
+│  │                  │   │                      │    │
+│  └──────────────────┘   └──────────────────────┘    │
+│                                                      │
+├──────────────────────────────────────────────────────┤
+│ TRANSFERTS · 1                                       │
+│ [ ↑ photo.jpg  67%  15 MB/s ]                        │
+└──────────────────────────────────────────────────────┘</code></pre>
+
+<h3>App desktop SFML — SharePanel (colonne droite, 240 px)</h3>
+<pre><code>┌────────────────┐
+│ PARTAGE WEB    │
+│                │
+│  ┌──────────┐  │
+│  │  QR 160  │  │
+│  │  ▀▄█▀▄█  │  │
+│  │  █▄▀█▄▀  │  │
+│  └──────────┘  │
+│                │
+│ URL            │
+│ 192.168.1.42:  │
+│ 45456          │
+│  [ Copier ]    │
+│                │
+│ CODE D'ACCES   │
+│                │
+│ 4 7 2 9 3 1    │
+│                │
+│ 📱 Scannez ou  │
+│ tapez l'URL    │
+└────────────────┘</code></pre>
+
+<h3>DeviceListItem — différenciation Native / Web</h3>
+<pre><code>Natif (inchangé) :
+┌──────────────────────────────────────┐
+│  🟪  Mac de Lena                     │
+│      macOS                     (○)   │
+└──────────────────────────────────────┘
+
+Web (pill "Web" accent-light, radius pill) :
+┌──────────────────────────────────────┐
+│  🟪  iPhone (Safari)       [ Web ]   │
+│      iOS                       (○)   │
+└──────────────────────────────────────┘</code></pre>
+
+<!-- ==================== 9. SÉCURITÉ ==================== -->
+<h2 id="securite">9. Sécurité &amp; limites V1</h2>
+
+<h3>Modèle de sécurité</h3>
+<ul>
+  <li><strong>PIN d'accès web</strong> : 6 chiffres aléatoires
+    générés au démarrage de l'app (stable pour toute la session d'app).
+    <em>Distinct</em> du PIN per-transfer 4 chiffres du protocole natif.
+    Affiché dans la <code>SharePanel</code> desktop.</li>
+  <li><strong>Cookie de session</strong> : <code>HttpOnly</code> +
+    <code>SameSite=Lax</code>. Valide tant que le host tourne et que la
+    session a été touchée dans les 30 dernières secondes
+    (<code>kWebSessionTtl</code>).</li>
+  <li><strong>Tickets de download</strong> : one-shot + TTL 5 minutes
+    (<code>kDownloadTicketTtl</code>). Le ticket est vérifié contre le
+    token de session (pas d'usage croisé).</li>
+  <li><strong>Upload path traversal</strong> : le nom de fichier est
+    désinfecté (<code>path::filename()</code>), l'écriture utilise
+    <code>FilesystemService::uniqueTargetPath()</code> qui gère les
+    collisions sans écraser (<code>foo.txt</code> → <code>foo (1).txt</code>).</li>
+</ul>
+
+<h3>Limites V1 assumées</h3>
+<table>
+<thead><tr><th>Limite</th><th>Raison</th><th>Reporté en</th></tr></thead>
+<tbody>
+  <tr>
+    <td>Pas de HTTPS (HTTP plain)</td>
+    <td>Certificat self-signed = warnings navigateur pénibles</td>
+    <td>V2</td>
+  </tr>
+  <tr>
+    <td>Pas de mDNS / Bonjour</td>
+    <td>QR code + URL manuelle suffisent pour V1</td>
+    <td>V2</td>
+  </tr>
+  <tr>
+    <td>Sessions perdues au redémarrage app</td>
+    <td>100% in-memory. Redémarrage = re-PIN sur les navigateurs</td>
+    <td>V2</td>
+  </tr>
+  <tr>
+    <td>Pas de rate-limit sur le PIN</td>
+    <td>Risque mineur sur LAN de confiance</td>
+    <td>V2</td>
+  </tr>
+  <tr>
+    <td>Pas de signature des binaires distribués</td>
+    <td>Hors scope code. Apple Developer ID + Authenticode à acquérir.</td>
+    <td><strong>Requis avant release publique</strong></td>
+  </tr>
+  <tr>
+    <td>macOS <code>.app</code> zippé en RAM complète</td>
+    <td>Acceptable &lt; 50 Mo. Streaming zip à prévoir si taille augmente.</td>
+    <td>V2</td>
+  </tr>
+</tbody>
+</table>
+
+<h3>Hypothèse fondamentale</h3>
+<div class="call-out">
+  <strong>Hypothèse LAN de confiance</strong> : V1 part du principe que
+  le réseau local est de confiance (WiFi domestique/bureau, pas de
+  WiFi public ouvert). Le PIN + les cookies cookie-session sont
+  suffisants dans ce contexte. Pour des scénarios plus exposés (WiFi
+  café, réseau d'entreprise hostile), V2 ajoutera HTTPS self-signed +
+  vérification SHA-256 côté page web.
+</div>
+
+<!-- ==================== 10. DOCUMENTS LIÉS ==================== -->
+<h2 id="docs">10. Documents liés</h2>
+
+<ul class="link-list">
+  <li>
+    <a href="../specs/web-interface/business-spec.md">📋 Spécification métier</a>
+    <div class="desc">Le QUOI et POURQUOI — règles métier R1 à R7, cas d'usage, critères d'acceptation.</div>
+  </li>
+  <li>
+    <a href="../specs/web-interface/architecture.md">🏗️ Architecture technique</a>
+    <div class="desc">Le COMMENT — diagrammes, couches, contrat d'implémentation, ports, dépendances.</div>
+  </li>
+  <li>
+    <a href="../specs/web-interface/ui-proposal.md">🎨 Propositions UI validées</a>
+    <div class="desc">Layout page web (Option C : split adaptive), SharePanel (Option A : colonne droite), DeviceListItem (Option C : pill).</div>
+  </li>
+  <li>
+    <a href="../specs/web-interface/audit-report.md">🔍 Rapport d'audit qualité</a>
+    <div class="desc">6 dimensions auditées — score final 94.2/100. Bug critique (TransferDoneEvent prématuré) corrigé.</div>
+  </li>
+  <li>
+    <a href="../../docs-agents/WEB.md">🤖 Guide agents IA (WEB.md)</a>
+    <div class="desc">Documentation orientée agents/futures sessions Claude — endpoints détaillés, pièges, flows internes.</div>
+  </li>
+</ul>
+
+<!-- ==================== 11. CHANGELOG ==================== -->
+<h2 id="changelog">11. Changelog</h2>
+
+<h3>V1.1.8 — 2026-04-24 <span class="badge accent">LIVRÉE</span></h3>
+<p>
+  Suppression du fichier zip temporaire pour les envois dossier host → web.
+  Le zip est désormais assemblé <strong>à la volée</strong> dans la réponse HTTP,
+  sans jamais toucher le disque. Premier octet reçu côté navigateur &lt; 200 ms
+  après le clic « Télécharger ».
+</p>
+<ul>
+  <li>✅ <strong>ZIP streamé à la volée</strong> (<code>StreamingZipSource</code>) : format STORE + data descriptor, CRC32 calculé incrémentalement par chunk, Content-Length exact précalculé</li>
+  <li>✅ <strong>Zéro fichier temp</strong> : <code>/tmp/ltr-zip-*.zip</code> disparaît complètement du flow, <code>folder_zipper</code> supprimé</li>
+  <li>✅ <strong>Tickets rejouables</strong> (V1.1.8) : le visiteur peut retélécharger pendant les 15 min du TTL si rupture réseau ou mauvais clic (<code>consume()</code> → <code>get()</code> non-destructif)</li>
+  <li>✅ <strong>Progress events throttlés</strong> : 100 ms / 1 MB pour ne pas flooder l'EventBus desktop</li>
+  <li>✅ <strong>Test unitaire octet-exact</strong> : <code>test_streaming_zip</code> vérifie la formule <code>Σ(92 + 2·nameLen + fileSize) + 22</code> + valide le zip avec miniz</li>
+  <li>✅ <strong>8/8 tests passent</strong>, 0 régression</li>
+</ul>
+
+<h3>V1.1.7 — 2026-04-23 <span class="badge accent">LIVRÉE</span></h3>
+<p>
+  Itération UX + performance : transferts de dossiers dans les deux sens,
+  réactivité de l'app (thread background), modularité JS côté web.
+</p>
+<ul>
+  <li>✅ <strong>Envoi dossier web → host</strong> (sans zip) : <code>webkitdirectory</code> → chemin relatif préservé → arborescence reconstruite (desktop + Android ; iOS masqué)</li>
+  <li>✅ <strong>Zip host → web en thread background</strong> : app desktop 100% réactive pendant compression</li>
+  <li>✅ <strong>Mode STORE</strong> (no compression miniz) : 5-10× plus rapide sur contenu binaire, taille quasi-identique</li>
+  <li>✅ <strong>JS modulaire</strong> : <code>common.js</code> + <code>upload.js</code> + <code>download.js</code> + <code>app.js</code> (bootstrap)</li>
+  <li>✅ <strong>Sanitize path traversal</strong> : rejet strict <code>..</code>, absolus, null bytes côté <code>/api/upload</code></li>
+  <li>✅ Règles de threading documentées</li>
+  <li>✅ <code>assets/web/README.md</code> pour la structure web</li>
+</ul>
+
+<h3>V1.1 — 2026-04-22 <span class="badge accent">LIVRÉE</span></h3>
+<p>
+  Correctifs majeurs + repensée du mécanisme session/device après tests
+  réels sur iOS Safari et Android Chrome. <strong>9 bugs fonctionnels résolus</strong>.
+</p>
+<ul>
+  <li>✅ <strong>Saisie PIN visible</strong> sur iOS (police ramenée à 24px au lieu de 44px qui cassait)</li>
+  <li>✅ <strong>Pas d'auto-submit</strong> : soumission du PIN uniquement au clic « Se connecter » ou Entrée</li>
+  <li>✅ <strong>Page /login dédiée</strong> (HTML séparé + redirect 302 Location:/ en succès)</li>
+  <li>✅ <strong>Session stable tant que l'onglet est ouvert</strong> : fix keepalive SSE (touch à chaque itération du handler)</li>
+  <li>✅ <strong>Pas de duplication</strong> dans la liste desktop : identité stable via <code>deviceId</code> dans <code>localStorage</code>, distincte du <code>sessionToken</code> éphémère (cookie)</li>
+  <li>✅ <strong>Statuts Proposé / Expiré</strong> pour les transferts desktop → web (TTL ticket 15 min) + bouton Annuler pour les Proposed</li>
+  <li>✅ <strong>Téléchargement web retourne le fichier</strong>, plus de JSON pollué (fetch + blob côté JS, 401 → redirect /login)</li>
+  <li>✅ <strong>Upload mobile fonctionne</strong> (iOS + Android) : bouton explicite « Choisir des fichiers » + input CSS offscreen au lieu de <code>hidden</code></li>
+  <li>✅ <strong>Fichiers desktop auto-vidés après envoi</strong> : cases à cocher par fichier + auto-clean sur <code>TransferDoneEvent</code></li>
+  <li>✅ <strong>Bouton « Se déconnecter »</strong> dans le header web (icône mobile, icône + texte desktop via media query)</li>
+  <li>✅ Nouveau endpoint <code>POST /api/logout</code></li>
+  <li>✅ Nouveau test <code>web_session_dedup</code> (7/7 passent)</li>
+  <li>✅ Aucune régression sur le flow TCP LTR1</li>
+</ul>
+<p>
+  Détails : <a href="../specs/web-interface-v1-1/business-spec.md">business-spec V1.1</a>,
+  <a href="../specs/web-interface-v1-1/architecture.md">architecture V1.1</a>,
+  <a href="../specs/web-interface-v1-1/ui-proposal.md">ui-proposal V1.1</a>.
+</p>
+
+<h3>V1.0 — 2026-04-22</h3>
+<ul>
+  <li>✅ Serveur HTTP embarqué port 45456 (fallback 45457-45466)</li>
+  <li>✅ Auth PIN 6 chiffres, sessions cookie <code>ltr_token</code></li>
+  <li>✅ Upload multipart navigateur → host (POST <code>/api/upload</code>)</li>
+  <li>✅ Download host → navigateur via SSE + tickets (GET <code>/api/events</code>, <code>/api/download/:id</code>)</li>
+  <li>✅ Liste de pairs unifiée : sessions web = <code>Device{kind=Web}</code> dans la sidebar desktop</li>
+  <li>✅ Pill visuel « Web » dans <code>DeviceListItem</code></li>
+  <li>✅ <code>SharePanel</code> desktop : QR code + URL + PIN + bouton Copier</li>
+  <li>✅ Auto-propagation du binaire (Windows <code>.exe</code>, macOS <code>.app.zip</code>, Linux ELF)</li>
+  <li>✅ Détection OS du visiteur → bandeau « Installer l'app native » si même OS</li>
+  <li>✅ Page web vanilla JS/CSS embarquée dans le binaire (~35 Ko)</li>
+  <li>✅ 4 nouveaux tests : <code>web_session_store</code>, <code>download_ticket</code>, <code>qr_code</code>, <code>http_smoke</code></li>
+  <li>✅ Documentation : <code>docs-agents/WEB.md</code> + 4 READMEs par couche</li>
+</ul>
+
+<footer>
+  Généré par le pipeline multi-agents :
+  Business Analyst → Architecture → UI/UX → Dev → Audit → Doc.<br>
+  LocalTransfer · Projet C++17 / SFML 2.6 · Licence à définir.
+</footer>
+
+</div>
+</body>
+</html>

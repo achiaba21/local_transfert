@@ -1,0 +1,50 @@
+# Build artefacts
+build/
+build-*/
+cmake-build-*/
+out/
+*.o
+*.a
+*.dylib
+*.dSYM/
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+
+# IDE
+.vscode/
+.idea/
+.cache/
+*.user
+*.kdev4
+*.swp
+*~
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Linux
+.directory
+
+# Logs
+*.log
+
+# Generated assets
+generated/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Local config / secrets
+.env
+*.local
+
+# Tests temp
+/tmp/ltr_*

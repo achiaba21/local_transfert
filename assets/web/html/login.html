@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<title>LocalTransfer · Connexion</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body class="page-login">
+
+<main class="login-stage" role="main">
+
+  <div class="login-brand" aria-hidden="true">
+    <span class="brand-dot"></span>
+    <span class="brand-label">LocalTransfer</span>
+  </div>
+
+  <h1 class="login-title">Code d'accès</h1>
+  <p class="login-sub">
+    Affiché sur <strong id="host-name">cet appareil</strong>
+  </p>
+
+  <form id="pin-form" autocomplete="off" novalidate>
+    <div class="pin-row" role="group" aria-label="Code à 6 chiffres">
+      <input class="pin-input" type="tel" inputmode="numeric" maxlength="1"
+             pattern="[0-9]" aria-label="Chiffre 1"
+             autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+      <input class="pin-input" type="tel" inputmode="numeric" maxlength="1"
+             pattern="[0-9]" aria-label="Chiffre 2"
+             autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+      <input class="pin-input" type="tel" inputmode="numeric" maxlength="1"
+             pattern="[0-9]" aria-label="Chiffre 3"
+             autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+      <input class="pin-input" type="tel" inputmode="numeric" maxlength="1"
+             pattern="[0-9]" aria-label="Chiffre 4"
+             autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+      <input class="pin-input" type="tel" inputmode="numeric" maxlength="1"
+             pattern="[0-9]" aria-label="Chiffre 5"
+             autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+      <input class="pin-input" type="tel" inputmode="numeric" maxlength="1"
+             pattern="[0-9]" aria-label="Chiffre 6"
+             autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+    </div>
+
+    <p class="error-msg" id="pin-error" hidden>Code incorrect, réessayez.</p>
+
+    <button type="submit" class="btn btn-primary btn-login">Se connecter</button>
+  </form>
+
+</main>
+
+<script src="/login.js" defer></script>
+</body>
+</html>

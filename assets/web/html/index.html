@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<title>LocalTransfer</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body class="page-main">
+
+<header class="app-header" role="banner">
+  <span class="brand-dot" aria-hidden="true"></span>
+  <h1 class="brand">LocalTransfer</h1>
+  <span class="host-pill" id="host-name" aria-label="Appareil hôte">…</span>
+  <button class="logout-btn" id="logout-btn"
+          aria-label="Se déconnecter" title="Se déconnecter">
+    <span class="logout-icon" aria-hidden="true">⎋</span>
+    <span class="logout-label">Se déconnecter</span>
+  </button>
+</header>
+
+<main class="app-main" role="main">
+
+  <section class="main-screen">
+
+    <div class="install-banner" id="install-banner" hidden>
+      <div class="install-text">
+        <strong id="install-title">Installer l'app native</strong>
+        <span id="install-sub">Transferts plus rapides et découverte auto.</span>
+      </div>
+      <div class="install-actions">
+        <a class="btn btn-primary" id="install-btn" href="/download/self">Installer</a>
+        <button class="btn-ghost" id="install-close" aria-label="Fermer">×</button>
+      </div>
+    </div>
+
+    <div class="split-layout">
+
+      <!-- Colonne ENVOYER -->
+      <section class="col col-send" aria-labelledby="send-title">
+        <h2 id="send-title" class="overline">Envoyer</h2>
+
+        <label class="drop-zone" id="drop-zone" for="file-input">
+          <span class="drop-icon" aria-hidden="true">⬆</span>
+          <span class="drop-title">Déposez ou tapez ici</span>
+          <span class="drop-hint">pour choisir des fichiers</span>
+        </label>
+
+        <!-- 2 inputs distincts : fichiers ou dossier (webkitdirectory) -->
+        <input type="file" id="file-input" multiple class="file-input-hidden">
+        <input type="file" id="folder-input" webkitdirectory class="file-input-hidden">
+
+        <div class="pick-buttons">
+          <label for="file-input" class="btn btn-primary btn-pick">
+            Choisir des fichiers
+          </label>
+          <label for="folder-input" class="btn btn-secondary btn-pick" id="folder-btn">
+            Choisir un dossier
+          </label>
+        </div>
+        <p class="hint" id="folder-hint" hidden>
+          Sur iPhone, compresse d'abord le dossier en .zip.
+        </p>
+
+        <ul class="upload-list" id="upload-list" aria-live="polite"></ul>
+      </section>
+
+      <!-- Colonne REÇUS -->
+      <section class="col col-recv" aria-labelledby="recv-title">
+        <h2 id="recv-title" class="overline">
+          Reçus du host · <span id="recv-count">0</span>
+        </h2>
+        <ul class="download-list" id="download-list">
+          <li class="empty-state">Aucun fichier reçu pour le moment.</li>
+        </ul>
+      </section>
+
+    </div>
+
+    <footer class="transfers-bar" aria-labelledby="transfers-title">
+      <h2 id="transfers-title" class="overline">
+        Transferts · <span id="tx-count">0</span>
+      </h2>
+      <div class="transfers-list" id="transfers-list"></div>
+    </footer>
+
+  </section>
+
+</main>
+
+<!-- Ordre de chargement : common.js (utilitaires) d'abord, puis modules,
+     puis app.js qui orchestre. Tous en defer pour conserver l'ordre. -->
+<script src="/common.js"   defer></script>
+<script src="/upload.js"   defer></script>
+<script src="/download.js" defer></script>
+<script src="/app.js"      defer></script>
+</body>
+</html>

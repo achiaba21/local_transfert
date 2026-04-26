@@ -1,0 +1,288 @@
+#include "ltr/ui/widgets/share_panel.hpp"
+
+#include <chrono>
+#include <string>
+
+#include <SFML/Graphics/Sprite.hpp>
+#include <SFML/Window/Clipboard.hpp>
+
+#include "ltr/ui/icon_library.hpp"
+#include "ltr/ui/rounded_rect.hpp"
+#include "ltr/ui/theme.hpp"
+#include "ltr/ui/utf8.hpp"
+#include "ltr/ui/widgets/card.hpp"
+#include "ltr/ui/widgets/label.hpp"
+
+namespace ltr::ui {
+
+namespace {
+
+constexpr float kQrSize        = 220.f;   // V1.1.8-UX4 : 160 → 220
+constexpr float kCopyBtnH      = 32.f;
+constexpr float kCloseBtnSize  = 16.f;
+constexpr unsigned kPinSize    = 44;      // V1.1.8-UX4 : 28 → 44
+
+float monotonicSeconds() {
+    using namespace std::chrono;
+    return static_cast<float>(
+        duration_cast<milliseconds>(
+            steady_clock::now().time_since_epoch()).count()) / 1000.f;
+}
+
+} // namespace
+
+SharePanel::SharePanel() {
+    copyUrlBtn_.setLabel("Copier URL")
+               .setVariant(Button::Variant::Secondary)
+               .onClick([this]{
+                   if (!url_.empty()) {
+                       sf::Clipboard::setString(utf8(url_));
+                       copiedUrlUntil_ = monotonicSeconds() + 2.f;
+                   }
+               });
+
+    copyPinBtn_.setLabel("Copier PIN")
+               .setVariant(Button::Variant::Secondary)
+               .onClick([this]{
+                   if (!pin_.empty()) {
+                       sf::Clipboard::setString(utf8(pin_));
+                       copiedPinUntil_ = monotonicSeconds() + 2.f;
+                   }
+               });
+}
+
+SharePanel& SharePanel::setBounds(const sf::FloatRect& r) {
+    bounds_ = r;
+    layoutChildren();
+    return *this;
+}
+
+SharePanel& SharePanel::setUrl(const std::string& url) {
+    url_ = url;
+    return *this;
+}
+
+SharePanel& SharePanel::setPin(const std::string& pin6) {
+    pin_ = pin6;
+    return *this;
+}
+
+SharePanel& SharePanel::setQrImage(const sf::Image& img) {
+    qr_.setImage(img);
+    return *this;
+}
+
+SharePanel& SharePanel::setCollapsed(bool c) {
+    collapsed_ = c;
+    layoutChildren();
+    return *this;
+}
+
+SharePanel& SharePanel::setVisitorCount(int n) {
+    visitorCount_ = n < 0 ? 0 : n;
+    return *this;
+}
+
+SharePanel& SharePanel::onToggle(std::function<void()> cb) {
+    toggleCb_ = std::move(cb);
+    return *this;
+}
+
+void SharePanel::layoutChildren() {
+    if (collapsed_) {
+        // Rien à layouter en collapsed (dessin direct + icône).
+        return;
+    }
+
+    const float left = bounds_.left + Spacing::lg;
+    const float right = bounds_.left + bounds_.width - Spacing::lg;
+    const float width = right - left;
+
+    // QR centré sous l'overline + bouton fermer.
+    const float qrY = bounds_.top + 56.f;
+    qr_.setBounds({ bounds_.left + (bounds_.width - kQrSize) / 2.f,
+                    qrY, kQrSize, kQrSize });
+
+    // 2 boutons Copier (empilés) sous l'URL.
+    const float btn1Y = qrY + kQrSize + Spacing::xl + 48.f;
+    copyUrlBtn_.setBounds({ left, btn1Y, width, kCopyBtnH });
+    const float btn2Y = btn1Y + kCopyBtnH + Spacing::sm;
+    copyPinBtn_.setBounds({ left, btn2Y, width, kCopyBtnH });
+}
+
+sf::FloatRect SharePanel::collapseBtnRect() const {
+    return { bounds_.left + bounds_.width - Spacing::lg - kCloseBtnSize,
+             bounds_.top + Spacing::xl - 2.f,
+             kCloseBtnSize, kCloseBtnSize };
+}
+
+void SharePanel::handleEvent(const sf::Event& e) {
+    if (collapsed_) {
+        // Tout clic sur le rail = toggle.
+        if (e.type == sf::Event::MouseButtonReleased &&
+            e.mouseButton.button == sf::Mouse::Left) {
+            const float mx = static_cast<float>(e.mouseButton.x);
+            const float my = static_cast<float>(e.mouseButton.y);
+            if (bounds_.contains(mx, my) && toggleCb_) {
+                toggleCb_();
+            }
+        }
+        return;
+    }
+
+    // Expanded : croix haut-droit + boutons Copier.
+    if (e.type == sf::Event::MouseButtonReleased &&
+        e.mouseButton.button == sf::Mouse::Left) {
+        const float mx = static_cast<float>(e.mouseButton.x);
+        const float my = static_cast<float>(e.mouseButton.y);
+        if (collapseBtnRect().contains(mx, my) && toggleCb_) {
+            toggleCb_();
+            return;
+        }
+    }
+    copyUrlBtn_.handleEvent(e);
+    copyPinBtn_.handleEvent(e);
+}
+
+void SharePanel::draw(sf::RenderTarget& target) const {
+    if (collapsed_) { drawCollapsed(target); return; }
+    drawExpanded(target);
+}
+
+void SharePanel::drawExpanded(sf::RenderTarget& target) const {
+    // Fond + bordure gauche.
+    Card{}.setBounds(bounds_).setColor(Colors::surface).draw(target);
+    Card{}.setBounds({ bounds_.left, bounds_.top, 1.f, bounds_.height })
+          .setColor(Colors::separator).draw(target);
+
+    // Overline "PARTAGE WEB"
+    Label title;
+    title.setText("PARTAGE WEB")
+         .setBold(true).setSize(FontSize::overline)
+         .setColor(Colors::textSecondary)
+         .setPosition(bounds_.left + Spacing::lg,
+                      bounds_.top + Spacing::xl);
+    title.draw(target);
+
+    // Bouton fermer (×) haut-droit — sprite vectoriel Close.
+    const auto cbr = collapseBtnRect();
+    sf::Sprite close(IconLibrary::get(IconLibrary::Id::Close));
+    close.setColor(Colors::textSecondary);
+    close.setPosition(cbr.left, cbr.top);
+    target.draw(close);
+
+    // QR
+    qr_.draw(target);
+
+    // Label "URL" + URL affichée
+    const float urlY = qr_.bounds().top + qr_.bounds().height + Spacing::lg;
+
+    Label urlOverline;
+    urlOverline.setText("URL")
+               .setBold(true).setSize(FontSize::overline)
+               .setColor(Colors::textSecondary)
+               .setPosition(bounds_.left + Spacing::lg, urlY);
+    urlOverline.draw(target);
+
+    Label urlText;
+    const std::string displayUrl = url_.empty() ? "\xE2\x80\x94" : url_;
+    urlText.setText(displayUrl)
+           .setBold(true).setSize(FontSize::body)
+           .setColor(Colors::text)
+           .setPosition(bounds_.left + Spacing::lg, urlY + 16.f);
+    urlText.draw(target);
+
+    // Boutons Copier URL / Copier PIN (avec feedback "Copi\xC3\xA9 !").
+    const float now = monotonicSeconds();
+    auto drawBtn = [&](const Button& src, float until, const std::string& hot){
+        if (now < until) {
+            Button ephemeral;
+            ephemeral.setLabel(hot)
+                     .setVariant(Button::Variant::Secondary)
+                     .setBounds(src.bounds())
+                     .setEnabled(false);
+            ephemeral.draw(target);
+        } else {
+            src.draw(target);
+        }
+    };
+    drawBtn(copyUrlBtn_, copiedUrlUntil_, "Copi\xC3\xA9 !");
+    drawBtn(copyPinBtn_, copiedPinUntil_, "Copi\xC3\xA9 !");
+
+    // Section PIN — « CODE D'ACC\xC3\x88S » avec accent correct V1.1.8-UX4.
+    const float pinLabelY = copyPinBtn_.bounds().top
+                          + copyPinBtn_.bounds().height + Spacing::xl;
+
+    Label pinOverline;
+    pinOverline.setText("CODE D'ACC\xC3\x88S")
+               .setBold(true).setSize(FontSize::overline)
+               .setColor(Colors::textSecondary)
+               .setPosition(bounds_.left + Spacing::lg, pinLabelY);
+    pinOverline.draw(target);
+
+    // PIN formaté avec espaces (kerning simple).
+    std::string pinSpaced;
+    for (std::size_t i = 0; i < pin_.size(); ++i) {
+        if (i) pinSpaced.push_back(' ');
+        pinSpaced.push_back(pin_[i]);
+    }
+    if (pinSpaced.empty()) pinSpaced = "\xE2\x80\x94 \xE2\x80\x94 \xE2\x80\x94 "
+                                        "\xE2\x80\x94 \xE2\x80\x94 \xE2\x80\x94";
+
+    Label pinLabel;
+    pinLabel.setText(pinSpaced)
+            .setBold(true).setSize(kPinSize)
+            .setColor(Colors::accent)
+            .setPosition(bounds_.left + Spacing::lg, pinLabelY + 22.f);
+    pinLabel.draw(target);
+
+    // Hint bas
+    const float hintY = pinLabelY + kPinSize + 24.f;
+    Label hint;
+    hint.setText("Scannez le QR ou tapez l'URL.")
+        .setSize(FontSize::small)
+        .setColor(Colors::textSecondary)
+        .setPosition(bounds_.left + Spacing::lg, hintY);
+    hint.draw(target);
+}
+
+void SharePanel::drawCollapsed(sf::RenderTarget& target) const {
+    // Fond + bordure gauche.
+    Card{}.setBounds(bounds_).setColor(Colors::surface).draw(target);
+    Card{}.setBounds({ bounds_.left, bounds_.top, 1.f, bounds_.height })
+          .setColor(Colors::separator).draw(target);
+
+    // Icône QR centrée en haut.
+    constexpr float kIconSize = 20.f;
+    sf::Sprite qrIcon(IconLibrary::get(IconLibrary::Id::QrCode));
+    const auto lb = qrIcon.getLocalBounds();
+    const float scale = kIconSize / lb.width;
+    qrIcon.setScale(scale, scale);
+    qrIcon.setColor(Colors::accent);
+    qrIcon.setPosition(
+        bounds_.left + (bounds_.width - kIconSize) / 2.f,
+        bounds_.top + 80.f);
+    target.draw(qrIcon);
+
+    // Badge numérique si visiteur(s) web connecté(s).
+    if (visitorCount_ > 0) {
+        const float pillW = 24.f;
+        const float pillH = 18.f;
+        const float pillX = bounds_.left + (bounds_.width - pillW) / 2.f;
+        const float pillY = bounds_.top + 80.f + kIconSize + 8.f;
+        RoundedRect pill(pillX, pillY, pillW, pillH, Radius::pill);
+        pill.setFillColor(Colors::accent);
+        pill.draw(target);
+
+        Label cnt;
+        cnt.setText(std::to_string(visitorCount_))
+           .setBold(true).setSize(FontSize::overline)
+           .setColor(sf::Color::White);
+        const auto m = cnt.measure();
+        cnt.setPosition(pillX + (pillW - m.x) / 2.f,
+                         pillY + (pillH - m.y) / 2.f - 2.f);
+        cnt.draw(target);
+    }
+}
+
+} // namespace ltr::ui

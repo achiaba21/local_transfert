@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>LocalTransfer — Documentation</title>
+<style>
+  :root {
+    --bg:#ffffff; --fg:#1a1d23; --mute:#6b7280; --accent:#4f46e5;
+    --sep:#e5e7eb; --sidebar:#f3f4f6; --ok:#22c55e; --warn:#f59e0b;
+    --err:#ef4444; --code:#0f172a; --code-fg:#e2e8f0;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Helvetica,sans-serif;
+         color:var(--fg); background:var(--bg); line-height:1.55; }
+  .wrap { max-width:960px; margin:0 auto; padding:48px 32px; }
+  header { border-bottom:1px solid var(--sep); padding-bottom:24px; margin-bottom:32px; }
+  h1 { margin:0 0 8px; font-size:32px; }
+  h2 { margin-top:48px; padding-bottom:8px; border-bottom:1px solid var(--sep);
+       font-size:22px; }
+  h3 { margin-top:28px; font-size:16px; color:var(--accent); }
+  .meta { color:var(--mute); font-size:13px; }
+  .badges { margin:12px 0 0; display:flex; gap:8px; flex-wrap:wrap; }
+  .badge { display:inline-block; padding:3px 10px; border-radius:12px;
+           font-size:11px; font-weight:600; background:var(--sidebar);
+           color:var(--fg); border:1px solid var(--sep); }
+  .badge.ok   { background:#ecfdf5; color:var(--ok);   border-color:var(--ok); }
+  .badge.new  { background:#eef2ff; color:var(--accent); border-color:var(--accent); }
+  .badge.warn { background:#fef3c7; color:#92400e;      border-color:var(--warn); }
+  .badge.err  { background:#fef2f2; color:var(--err);   border-color:var(--err); }
+  code { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+         font-size:13px; background:var(--sidebar); padding:2px 6px; border-radius:4px; }
+  pre { background:var(--code); color:var(--code-fg); padding:16px; border-radius:8px;
+        overflow-x:auto; font-size:13px; line-height:1.5; }
+  pre code { background:transparent; padding:0; color:inherit; }
+  table { border-collapse:collapse; width:100%; margin:12px 0; font-size:14px; }
+  th,td { text-align:left; padding:8px 12px; border-bottom:1px solid var(--sep); }
+  th { background:var(--sidebar); font-weight:600; }
+  .callout { padding:14px 18px; border-left:4px solid var(--accent);
+             background:var(--sidebar); margin:16px 0; border-radius:0 6px 6px 0; }
+  .callout.warn { border-left-color:var(--warn); background:#fef3c7; }
+  .callout.err  { border-left-color:var(--err);  background:#fef2f2; }
+  ul { padding-left:20px; }
+  li { margin:4px 0; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+          gap:12px; margin:12px 0; }
+  .card { border:1px solid var(--sep); padding:14px 16px; border-radius:8px; }
+  .card h4 { margin:0 0 6px; font-size:14px; color:var(--accent); }
+  .card p  { margin:0; font-size:13px; color:var(--mute); }
+  footer { margin-top:64px; padding-top:24px; border-top:1px solid var(--sep);
+           color:var(--mute); font-size:12px; }
+  a { color:var(--accent); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>LocalTransfer</h1>
+  <p class="meta">
+    Application desktop C++17 / SFML de transfert de fichiers
+    peer-to-peer sur réseau local.
+  </p>
+  <div class="badges">
+    <span class="badge">Version 1.0</span>
+    <span class="badge">C++17</span>
+    <span class="badge">SFML 2.6.1</span>
+    <span class="badge">CMake 3.20+</span>
+    <span class="badge ok">Audit 85/100</span>
+    <span class="badge new">macOS ↔ Windows</span>
+  </div>
+  <p class="meta" style="margin-top:16px;">
+    Créée le 2026-04-18 · Dernière mise à jour 2026-04-18
+  </p>
+</header>
+
+<h2>1. Vue d'ensemble</h2>
+
+<p>
+  LocalTransfer permet de transférer fichiers et dossiers entre plusieurs
+  machines desktop (Mac et Windows) connectées au même réseau local, sans
+  configuration préalable, sans cloud tiers, et sans clé USB.
+</p>
+
+<div class="grid">
+  <div class="card">
+    <h4>Découverte auto</h4>
+    <p>UDP broadcast toutes les 2 s — les appareils apparaissent et
+       disparaissent en temps réel.</p>
+  </div>
+  <div class="card">
+    <h4>Transfert direct</h4>
+    <p>TCP peer-to-peer, jusqu'à 100 Go par fichier ou dossier, sans
+       intermédiaire.</p>
+  </div>
+  <div class="card">
+    <h4>Pairing sécurisé</h4>
+    <p>Code à 4 chiffres affiché des deux côtés. Accord explicite du
+       destinataire requis.</p>
+  </div>
+  <div class="card">
+    <h4>Multi-destinataires</h4>
+    <p>Sélection de plusieurs pairs → envoi en parallèle, chaque session
+       isolée dans son propre thread.</p>
+  </div>
+</div>
+
+<h2>2. Stack technique</h2>
+
+<table>
+  <tr><th>Composant</th><th>Choix</th><th>Raison</th></tr>
+  <tr><td>Langage</td><td>C++17</td><td>RAII, smart pointers, filesystem, structured bindings</td></tr>
+  <tr><td>UI & réseau</td><td>SFML 2.6.1</td><td>Cross-platform desktop, TCP/UDP sockets, graphique</td></tr>
+  <tr><td>Build</td><td>CMake 3.20+</td><td>Multi-compilateur (Clang/MSVC), FetchContent</td></tr>
+  <tr><td>JSON</td><td>nlohmann/json 3.11</td><td>Single-header, standard de facto</td></tr>
+  <tr><td>SHA-256</td><td>picosha2</td><td>Single-header, public domain</td></tr>
+  <tr><td>File picker</td><td>tinyfiledialogs</td><td>Dialogues natifs Mac/Windows</td></tr>
+</table>
+
+<h2>3. Architecture logicielle</h2>
+
+<p>Architecture en couches (Clean Architecture allégée) :</p>
+
+<pre><code>UI (SFML)  →  App (Controllers)  →  Domain  →  Infra + Network</code></pre>
+
+<table>
+  <tr><th>Couche</th><th>Responsabilité</th><th>Namespace</th></tr>
+  <tr><td>domain</td><td>Entités pures : Device, FileMeta, TransferRequest, TransferSession</td><td><code>ltr::domain</code></td></tr>
+  <tr><td>core</td><td>Types, EventBus thread-safe, Logger, helpers format</td><td><code>ltr::core</code></td></tr>
+  <tr><td>infra</td><td>Config, Filesystem, Hash (SHA-256)</td><td><code>ltr::infra</code></td></tr>
+  <tr><td>network</td><td>Protocol, Discovery (UDP), TransferServer (TCP), TransferClient</td><td><code>ltr::network</code></td></tr>
+  <tr><td>app</td><td>AppState, AppController (orchestrateur)</td><td><code>ltr::app</code></td></tr>
+  <tr><td>ui</td><td>Theme, Screens (MainScreen, IncomingOfferScreen), Widgets</td><td><code>ltr::ui</code></td></tr>
+</table>
+
+<h3>Modèle de concurrence</h3>
+
+<ul>
+  <li><b>UI thread</b> (main) : boucle SFML, rendu, input</li>
+  <li><b>Discovery</b> : 3 threads (beacon UDP / listener UDP / TTL sweep)</li>
+  <li><b>TransferServer</b> : 1 thread d'<code>accept()</code> + 1 thread par session entrante</li>
+  <li><b>TransferClient</b> : 1 thread par envoi sortant</li>
+</ul>
+
+<p>
+  Communication inter-threads : <code>EventBus</code> (mutex + queue de
+  <code>std::variant&lt;Event&gt;</code>) drainé par le thread UI à chaque
+  frame.
+</p>
+
+<h2>4. Protocole réseau</h2>
+
+<h3>Découverte — UDP 45454</h3>
+
+<p>Beacon JSON diffusé en broadcast toutes les 2 secondes :</p>
+
+<pre><code>{
+  "proto":    "LTR1",
+  "kind":     "HELLO",
+  "id":       "uuid-v4",
+  "name":     "Mac de Serge",
+  "platform": "macOS",
+  "tcpPort":  45455
+}</code></pre>
+
+<p>
+  Les pairs sont purgés après 6 secondes sans beacon (TTL). Le socket
+  broadcast active <code>SO_BROADCAST</code> via une sous-classe
+  <code>BroadcastUdpSocket</code> (SFML 2.6 ne l'expose pas nativement).
+</p>
+
+<h3>Transfert — TCP 45455</h3>
+
+<p>Framing binaire :</p>
+
+<pre><code>+--------+--------+----------+---------+
+| magic  | type   |  length  | payload |
+| "LTR1" |  u8    |  u32 BE  |  ...    |
+|  4 o   |  1 o   |   4 o    |   N o   |
++--------+--------+----------+---------+</code></pre>
+
+<table>
+  <tr><th>Code</th><th>Type</th><th>Payload</th></tr>
+  <tr><td>0x01</td><td>OFFER</td><td>JSON : sessionId, pin, files[]</td></tr>
+  <tr><td>0x02</td><td>ACCEPT</td><td>JSON : sessionId</td></tr>
+  <tr><td>0x03</td><td>REJECT</td><td>JSON : sessionId, reason</td></tr>
+  <tr><td>0x04</td><td>FILE_HEADER</td><td>JSON : index, relativePath, size</td></tr>
+  <tr><td>0x05</td><td>FILE_CHUNK</td><td>Binaire brut (≤ 256 KB)</td></tr>
+  <tr><td>0x06</td><td>FILE_END</td><td>JSON : index, sha256 (optionnel)</td></tr>
+  <tr><td>0x07</td><td>DONE</td><td>(vide)</td></tr>
+  <tr><td>0x08</td><td>CANCEL</td><td>JSON : reason</td></tr>
+  <tr><td>0x09</td><td>ERROR</td><td>JSON : code, message</td></tr>
+</table>
+
+<h2>5. Interface utilisateur</h2>
+
+<p>
+  Design validé : <b>Option B — Desktop 2 colonnes</b>. Fenêtre 960 × 600
+  (redimensionnable). Thème clair, accent indigo.
+</p>
+
+<pre><code>+-----------------------------------------------------------+
+|  Header  (LocalTransfer · nom-appareil · ⚙)               |
++--------------------+--------------------------------------+
+|  Sidebar 280 px    |  Panneau central                     |
+|                    |                                      |
+|  APPAREILS (N)     |  Envoyer à : ...                     |
+|  - PC Bureau   ✓   |  [liste fichiers sélectionnés]       |
+|  - MacBook Air     |  [📂 Parcourir]     [ENVOYER]        |
++--------------------+--------------------------------------+
+|  TRANSFERTS ACTIFS (défilement horizontal)                 |
++-----------------------------------------------------------+</code></pre>
+
+<p>
+  Une offre entrante affiche un <b>overlay modal</b> par-dessus le
+  MainScreen, contenant le code PIN, le résumé des fichiers, et les
+  boutons « Refuser / Accepter ».
+</p>
+
+<h2>6. Parcours utilisateur</h2>
+
+<ol>
+  <li>L'utilisateur lance l'app sur les deux machines</li>
+  <li>Les appareils apparaissent dans la sidebar (quelques secondes)</li>
+  <li>Sélection du ou des destinataires (clic sur DeviceListItem)</li>
+  <li>Clic sur <b>Parcourir</b> → sélection de fichiers ou d'un dossier</li>
+  <li>Clic sur <b>ENVOYER</b></li>
+  <li>Le destinataire voit une modale avec le code PIN et les fichiers</li>
+  <li>Il <b>Accepte</b> → le transfert démarre</li>
+  <li>Les deux côtés voient la progression (% / vitesse / ETA)</li>
+  <li>À la fin : notification et fichiers dans <code>~/Downloads/LocalTransfer/</code></li>
+</ol>
+
+<h2>7. Build &amp; exécution</h2>
+
+<h3>Prérequis</h3>
+
+<ul>
+  <li>CMake ≥ 3.20</li>
+  <li>Compilateur C++17 (Clang sur Mac, MSVC 2022 sur Windows)</li>
+  <li>Git</li>
+  <li>Mac : Xcode Command Line Tools (<code>xcode-select --install</code>)</li>
+  <li>Windows : Visual Studio 2022, workload « Desktop C++ »</li>
+</ul>
+
+<h3>Commandes</h3>
+
+<pre><code># Build Release
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release -j
+
+# Avec tests
+cmake -S . -B build -DLTR_BUILD_TESTS=ON
+cmake --build build -j
+ctest --test-dir build --output-on-failure
+
+# Lancement
+./build/local_transfer           # macOS
+build\Release\local_transfer.exe # Windows</code></pre>
+
+<div class="callout warn">
+  <b>Pare-feu</b> : autoriser les ports <b>UDP 45454</b> et <b>TCP 45455</b>
+  en entrée/sortie sur le réseau local. Au premier lancement, macOS et
+  Windows afficheront une boîte de dialogue de demande d'accès.
+</div>
+
+<h2>8. Configuration</h2>
+
+<p>
+  Un fichier <code>config.json</code> est créé au premier lancement dans :
+</p>
+
+<table>
+  <tr><th>OS</th><th>Chemin</th></tr>
+  <tr><td>macOS</td><td><code>~/Library/Application Support/LocalTransfer/config.json</code></td></tr>
+  <tr><td>Windows</td><td><code>%APPDATA%\LocalTransfer\config.json</code></td></tr>
+  <tr><td>Linux</td><td><code>~/.config/local-transfer/config.json</code></td></tr>
+</table>
+
+<p>Contenu :</p>
+
+<pre><code>{
+  "deviceId":    "uuid-v4",
+  "deviceName":  "user@host",
+  "platform":    "macOS",
+  "downloadDir": "~/Downloads/LocalTransfer"
+}</code></pre>
+
+<h2>9. Limitations connues (V1)</h2>
+
+<div class="callout">
+  <b>Assumées et documentées</b> — non bloquantes pour l'usage personnel sur
+  réseau de confiance.
+</div>
+
+<ul>
+  <li>🚫 <b>Pas de drag-and-drop</b> natif (SFML limitation) — sélection via
+      bouton « Parcourir » uniquement</li>
+  <li>🔓 <b>Pas de chiffrement TLS</b> des données (LAN de confiance
+      uniquement)</li>
+  <li>↺ <b>Pas de reprise</b> après interruption réseau</li>
+  <li>📱 <b>Support desktop uniquement</b> — pas de mobile</li>
+  <li>👥 <b>Deux instances sur une même machine</b> impossible (port UDP
+      45454 exclusif)</li>
+  <li>⏱ <b>Arrêt de l'app</b> peut prendre quelques secondes si des
+      transferts sont en cours (lecture TCP bloquante)</li>
+  <li>🗂 <b>Suppression individuelle d'un fichier</b> dans la liste
+      désactivée en V1 — utiliser « Vider »</li>
+</ul>
+
+<h2>10. Roadmap V2</h2>
+
+<table>
+  <tr><th>Feature</th><th>Difficulté</th><th>Note</th></tr>
+  <tr><td>Drag-and-drop natif</td><td>Haute</td><td>Nécessite code Cocoa + Win32</td></tr>
+  <tr><td>Reprise après interruption</td><td>Moyenne</td><td>Besoin : hash + offset</td></tr>
+  <tr><td>Chiffrement TLS optionnel</td><td>Moyenne</td><td>OpenSSL ou mbedTLS</td></tr>
+  <tr><td>Notification système native</td><td>Faible</td><td>Par OS</td></tr>
+  <tr><td>Support mobile</td><td>Très haute</td><td>Stack différente (Flutter)</td></tr>
+</table>
+
+<h2>11. Qualité &amp; tests</h2>
+
+<h3>Audit statique</h3>
+
+<p>
+  Score global : <b>85/100</b>. Détails dans
+  <code>.ai-outputs/specs/local-file-transfer/audit-report.md</code>.
+</p>
+
+<table>
+  <tr><th>Dimension</th><th>Score</th></tr>
+  <tr><td>Complexité</td><td>60/100</td></tr>
+  <tr><td>Lisibilité</td><td>90/100</td></tr>
+  <tr><td>DRY</td><td>95/100</td></tr>
+  <tr><td>Documentation</td><td>80/100</td></tr>
+  <tr><td>SOLID</td><td>90/100</td></tr>
+  <tr><td>Dette technique</td><td>95/100</td></tr>
+</table>
+
+<h3>Tests unitaires</h3>
+
+<ul>
+  <li><code>tests/test_protocol.cpp</code> — encodage de frames, magic,
+      longueur BE</li>
+  <li><code>tests/test_hash.cpp</code> — vérification SHA-256 contre
+      vecteurs NIST connus</li>
+</ul>
+
+<h2>12. Historique</h2>
+
+<table>
+  <tr><th>Version</th><th>Date</th><th>Changement</th></tr>
+  <tr>
+    <td>1.0</td><td>2026-04-18</td>
+    <td>Implémentation initiale : découverte UDP, transfert TCP, UI
+        desktop 2 colonnes, multi-destinataires, code PIN.</td>
+  </tr>
+</table>
+
+<footer>
+  Documentation générée par le pipeline multi-agents · <a href="index.html">↩ Index global</a>
+</footer>
+
+</div>
+</body>
+</html>
