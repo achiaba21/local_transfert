@@ -1,5 +1,145 @@
 # UI_GUIDELINES.md — Design system LocalTransfer
 
+## 🆕 Système d'affichage central (sprint UI Layout System, 2026-04-27)
+
+7 modules pour résoudre les débordements de texte, le clipping par
+zone, la non-uniformité des scrolls, l'absence de responsive.
+
+### `Label` étendu (text constraints)
+
+```cpp
+Label{}
+    .setText(longName)
+    .setSize(FontSize::body)
+    .setBounds({x, y, width, height})  // raccourci : maxWidth + position
+    .setMaxWidth(width)
+    .setEllipsis(true)
+    .setAlignment(Label::Alignment::Center)
+    .draw(target);
+```
+
+`setMaxWidth + setEllipsis(true)` tronque automatiquement avec `…` si
+le texte naturel dépasse. **Toujours appliquer dans les zones
+contraintes** (rows de listes, pills, zones flex).
+
+`setBounds(rect)` est un raccourci qui :
+- pose `maxWidth = rect.width`
+- positionne le label DANS le rect selon l'alignement courant
+
+### `ClipScope` (RAII)
+
+Pour garantir qu'aucun dessin ne déborde d'une zone :
+
+```cpp
+{
+    ClipScope clip(target, sidebarRect_);
+    drawSidebar(target);   // tout dessin clippé à sidebarRect_
+}
+// view restaurée auto à la sortie du scope
+```
+
+À utiliser autour de chaque grande zone du screen (header, sidebar,
+centre, share, bottom).
+
+### `ScrollArea` (widget scroll unifié)
+
+```cpp
+class MyScreen {
+    ScrollArea scroll_;
+
+    void draw() {
+        scroll_.setBounds(rect)
+               .setDirection(ScrollArea::Direction::Vertical)
+               .setContentSize(0.f, items.size() * rowH);
+
+        scroll_.forEachVisible(
+            items.size(),
+            [rowH](size_t i) {
+                return sf::FloatRect{0, i * rowH, w, rowH};
+            },
+            [&](size_t i, const sf::FloatRect& screenRect) {
+                drawItem(items[i], screenRect);
+            });
+
+        scroll_.draw(target);  // scrollbar
+    }
+
+    void handleEvent(const sf::Event& e) {
+        if (scroll_.handleEvent(e)) return;  // molette consommée
+        // ... reste du handling, hit tests tiennent compte du scrollY
+    }
+};
+```
+
+### `Breakpoint` responsive
+
+```cpp
+breakpoint_ = detectBreakpoint(viewSize_.x);  // Compact / Regular / Large
+const auto m = metricsFor(breakpoint_);
+
+// m.sidebarW           = 300 (Regular) ou 360 (Large) ou 0 (Compact masqué)
+// m.sharePanelExpandedW = 240 / 320 / 240
+// m.forceSharePanelCollapsed = true en Compact
+```
+
+Compact mode = bouton ☰ dans le header pour toggle sidebar visible/cachée.
+
+### Layout DSL `HBox` / `VBox`
+
+Mini-DSL fluent builder :
+
+```cpp
+HBox{}
+    .padding(Spacing::md)
+    .spacing(Spacing::sm)
+    .fixed(20.f, [](auto& t, const auto& r) { drawIcon(t, r); })
+    .expanded(1, [](auto& t, const auto& r) {
+        Label{}.setText(name).setBounds(r).setMaxWidth(r.width)
+              .setEllipsis(true).draw(t);
+    })
+    .fixed(80.f, [](auto& t, const auto& r) { drawButton(t, r); })
+    .layout(parentRect, target);
+```
+
+- `fixed(size, drawFn)` : enfant largeur (HBox) ou hauteur (VBox) fixe
+- `expanded(weight, drawFn)` : enfant qui prend `weight/total` de
+  l'espace restant
+- `spacer(size)` : espace vide
+- `padding(p)` ou `padding(h, v)` : marges internes
+- `spacing(s)` : entre enfants
+
+### Cache de mesure `LabelCache`
+
+Géré automatiquement par `Label::measure`. Vidé sur changement DPI.
+Ne pas appeler manuellement.
+
+### `DpiScale` (pour V2)
+
+Détecté au démarrage de `UiApp`. **Pas encore appliqué** aux tokens
+Theme. Pour propager en V2 :
+
+```cpp
+namespace Spacing {
+    inline float sm() { return DpiScale::scaled(8.f); }
+}
+```
+
+### `Animation` (helper)
+
+```cpp
+Animation fade_;
+fade_.start(0.f, 1.f, 0.2f, Animation::Easing::EaseOut);
+
+// chaque frame :
+fade_.update(dt.asSeconds());
+const float alpha = fade_.value();
+```
+
+Pas encore câblé sur les cards transfer / inbox — disponible comme
+infrastructure pour les sprints UX futurs.
+
+---
+
 ## 🆕 Drag & drop OS (sprint UX-3, 2026-04-24)
 
 ### Module

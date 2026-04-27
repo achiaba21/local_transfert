@@ -163,9 +163,10 @@ void IncomingOfferScreen::draw(sf::RenderTarget& target) const {
         Card{}.setBounds({0, 0, (float)viewSize_.x, (float)viewSize_.y})
             .setColor(Colors::overlay).draw(target);
 
+        // V1.1.10 : limite portée à 8 rows visibles (scroll vrai = V2).
         // Card large (640 px).
         const float w = 640.f;
-        const float maxRows = 5.f;
+        const float maxRows = 8.f;
         constexpr float kRowH = 60.f;
         const float rowsCount = static_cast<float>(
             std::min<std::size_t>(st.webInbox.size(),

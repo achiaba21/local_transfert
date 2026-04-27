@@ -214,6 +214,9 @@ void MainScreen::handleEvent(const sf::Event& e, const app::AppState& state) {
     // Panneau de partage web (bouton Copier).
     sharePanel_.handleEvent(e);
 
+    // V1.1.10 : molette dans la sidebar → scroll vertical liste APPAREILS.
+    if (peersScroll_.handleEvent(e)) return;
+
     // V1.1.5 : molette = scroll de la liste des fichiers dans le centre.
     // V1.1.8-UX2 : molette dans la zone TRANSFERTS = scroll horizontal
     // (utilise la molette verticale ET horizontale, shift non nécessaire).
@@ -262,8 +265,10 @@ void MainScreen::handleEvent(const sf::Event& e, const app::AppState& state) {
         }
 
         if (sidebarRect_.contains(mx, my) && my >= peerListStartY_) {
-            const int idx = static_cast<int>(
-                (my - peerListStartY_) / (kItemH + kItemGap));
+            // V1.1.10 : tient compte du scroll vertical sidebar.
+            const float contentY = (my - peerListStartY_)
+                                    + peersScroll_.scrollY();
+            const int idx = static_cast<int>(contentY / (kItemH + kItemGap));
             if (idx >= 0 && idx < static_cast<int>(state.peers.size())) {
                 controller_.toggleSelectPeer(state.peers[idx].id);
             }
@@ -604,15 +609,39 @@ void MainScreen::drawSidebar(sf::RenderTarget& target) const {
         return;
     }
 
-    float y = peerListStartY_;
-    for (const auto& d : st.peers) {
-        DeviceListItem item;
-        item.setBounds({sidebarRect_.left, y, sidebarRect_.width, kItemH})
-            .setDevice(d)
-            .setSelected(st.selectedPeerIds.count(d.id) > 0);
-        item.draw(target);
-        y += kItemH + kItemGap;
-    }
+    // V1.1.10 : liste APPAREILS scrollable via ScrollArea.
+    const float listTop = sidebarRect_.top + kSearchH + kListHeaderH;
+    const sf::FloatRect listRect{
+        sidebarRect_.left, listTop,
+        sidebarRect_.width,
+        sidebarRect_.top + sidebarRect_.height - listTop
+    };
+    const float rowStride = kItemH + kItemGap;
+    const float contentH = static_cast<float>(st.peers.size()) * rowStride;
+
+    peersScroll_.setBounds(listRect)
+                .setDirection(ScrollArea::Direction::Vertical)
+                .setContentSize(0.f, contentH);
+
+    peersScroll_.forEachVisible(
+        st.peers.size(),
+        [rowStride, &listRect](std::size_t i) {
+            return sf::FloatRect{
+                0.f,
+                static_cast<float>(i) * rowStride,
+                listRect.width,
+                kItemH
+            };
+        },
+        [&](std::size_t i, const sf::FloatRect& screen) {
+            DeviceListItem item;
+            item.setBounds(screen)
+                .setDevice(st.peers[i])
+                .setSelected(st.selectedPeerIds.count(st.peers[i].id) > 0);
+            item.draw(target);
+        });
+
+    peersScroll_.draw(target);
 }
 
 void MainScreen::drawCenter(sf::RenderTarget& target) const {
