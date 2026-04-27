@@ -58,6 +58,10 @@
   }
 
   // ==================== INSTALL BANNER ====================
+  // V1.1.10 : on n'affiche le banner QUE si l'OS du visiteur match l'OS
+  // du host (cas où /download/self fournit un binaire utilisable). Le cas
+  // cross-OS « Voir sur GitHub » est désactivé tant qu'il n'y a pas de
+  // releases publiées (cf. multi-os-installer/ANALYSIS.md).
   function setupInstallBanner() {
     try {
       if (sessionStorage.getItem('install-closed') === '1') return;
@@ -65,26 +69,19 @@
 
     const hostPlatform = state.hostInfo && state.hostInfo.platform;
     const same = hostPlatform === state.visitorPlatform;
+    if (!same) return;  // pas de banner cross-OS V1
+
     const banner = $('#install-banner');
     const title = $('#install-title');
     const sub = $('#install-sub');
     const btn = $('#install-btn');
 
-    if (same) {
-      title.textContent = `Installer l'app pour ${hostPlatform}`;
-      sub.textContent = 'Transferts plus rapides et découverte auto.';
-      btn.textContent = 'Installer';
-      btn.href = '/download/self';
-      btn.removeAttribute('target');
-      btn.removeAttribute('rel');
-    } else {
-      title.textContent = `Obtenir LocalTransfer pour ${state.visitorPlatform}`;
-      sub.textContent = 'Disponible sur GitHub Releases.';
-      btn.textContent = 'Voir sur GitHub';
-      btn.href = 'https://github.com/localtransfer/localtransfer/releases';
-      btn.target = '_blank';
-      btn.rel = 'noopener';
-    }
+    title.textContent = `Installer l'app pour ${hostPlatform}`;
+    sub.textContent = 'Transferts plus rapides et découverte auto.';
+    btn.textContent = 'Installer';
+    btn.href = '/download/self';
+    btn.removeAttribute('target');
+    btn.removeAttribute('rel');
     banner.hidden = false;
 
     $('#install-close').addEventListener('click', () => {
