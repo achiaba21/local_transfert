@@ -32,6 +32,12 @@ void registerEvents(WebService& svc) {
         auto ch = svc.broadcaster().attach(token);
         core::log_info("[SSE] attached broadcaster for " + token.substr(0, 8));
 
+        // V1.2 — Sprint Web P2P : push immédiat de l'annuaire au nouveau
+        // venu. L'`emitWebPeersToAll` qui suit l'auth est trop tôt — le
+        // canal SSE de cette session n'existe pas encore. Sans ce push,
+        // le nouveau client ne voit aucun pair tant qu'un 3e n'auth pas.
+        svc.emitWebPeersTo(token);
+
         res.set_header("Cache-Control", "no-cache");
         res.set_header("Connection", "keep-alive");
         res.set_header("X-Accel-Buffering", "no");
