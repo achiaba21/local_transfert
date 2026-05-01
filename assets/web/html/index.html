@@ -35,6 +35,15 @@
       </div>
     </div>
 
+    <!-- V1.2 — Sprint Web P2P : section annuaire des autres appareils web. -->
+    <section class="peers-section" hidden aria-labelledby="peers-title">
+      <h2 id="peers-title" class="overline">À envoyer à…</h2>
+      <ul class="peers-list" id="peers-list" role="listbox"
+          aria-label="Liste des autres appareils connectés"></ul>
+      <input type="file" id="peers-file-input" multiple
+             class="file-input-hidden">
+    </section>
+
     <div class="split-layout">
 
       <!-- Colonne ENVOYER -->
@@ -94,6 +103,7 @@
 <script src="/common.js"   defer></script>
 <script src="/upload.js"   defer></script>
 <script src="/download.js" defer></script>
+<script src="/peers.js"    defer></script>
 <script src="/app.js"      defer></script>
 </body>
 </html>

@@ -7,6 +7,9 @@
   const $ = (s) => document.querySelector(s);
 
   let sse = null;
+  // V1.2 — Sprint Web P2P : registre des handlers SSE supplémentaires
+  // (peers.js, p2p.js). On les attache à l'ouverture de la connexion.
+  const pendingListeners = [];
 
   function init() {
     openSse();
@@ -29,12 +32,23 @@
       }
     });
 
+    // Attache les handlers enregistrés par d'autres modules.
+    pendingListeners.forEach(({ name, cb }) => es.addEventListener(name, cb));
+    pendingListeners.length = 0;
+
     es.onerror = () => {
       if (es.readyState === EventSource.CLOSED) {
         clientLog('warn', '[dl] sse CLOSED → goToLogin');
         goToLogin();
       }
     };
+  }
+
+  // V1.2 — exposé pour peers.js / p2p.js. Si SSE déjà ouverte, attache
+  // immédiatement ; sinon mémorise pour l'attacher à l'open.
+  function addSseListener(name, cb) {
+    if (sse) sse.addEventListener(name, cb);
+    else pendingListeners.push({ name, cb });
   }
 
   function renderOffer(data) {
@@ -215,5 +229,6 @@
   }
 
   window.LTR = window.LTR || {};
-  window.LTR.initDownload = init;
+  window.LTR.initDownload  = init;
+  window.LTR.addSseListener = addSseListener;
 })();

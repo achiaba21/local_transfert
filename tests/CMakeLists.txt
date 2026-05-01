@@ -27,6 +27,11 @@ add_executable(test_display_name test_display_name.cpp)
 target_link_libraries(test_display_name PRIVATE ltr_core)
 add_test(NAME display_name COMMAND test_display_name)
 
+# V1.2 — Sprint Web P2P : routes signaling (401/400/404/204).
+add_executable(test_p2p_signal_routes test_p2p_signal_routes.cpp)
+target_link_libraries(test_p2p_signal_routes PRIVATE ltr_core cpphttplib)
+add_test(NAME p2p_signal_routes COMMAND test_p2p_signal_routes)
+
 add_executable(test_download_ticket test_download_ticket.cpp)
 target_link_libraries(test_download_ticket PRIVATE ltr_core)
 add_test(NAME download_ticket COMMAND test_download_ticket)

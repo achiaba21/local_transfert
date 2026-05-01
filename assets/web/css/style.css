@@ -490,12 +490,108 @@ body.page-main {
 }
 
 /* ============================================================
+   V1.2 — Sprint Web P2P : annuaire des autres appareils
+   ============================================================ */
+.peers-section {
+  margin: 0 0 var(--sp-lg);
+  padding: 0 var(--sp-lg);
+}
+.peers-section .overline {
+  margin: 0 0 var(--sp-sm);
+  padding: 0;
+  color: var(--text-secondary);
+  font-size: var(--fs-overline);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.peers-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 var(--sp-xs);
+  display: flex;
+  flex-wrap: nowrap;
+  gap: var(--sp-md);
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  /* hide scrollbar visually, keep functional */
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+.peers-list::-webkit-scrollbar { height: 4px; }
+.peers-list::-webkit-scrollbar-thumb {
+  background: var(--separator);
+  border-radius: var(--r-sm);
+}
+
+.peer-card {
+  flex: 0 0 auto;
+  width: 96px;
+  min-height: 110px;
+  padding: var(--sp-sm);
+  background: var(--surface);
+  border: 1px solid var(--separator);
+  border-radius: var(--r-md);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  cursor: pointer;
+  user-select: none;
+  scroll-snap-align: start;
+  transition: transform 120ms ease-out, border-color 120ms;
+}
+.peer-card:hover,
+.peer-card:focus-visible {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  outline: none;
+}
+.peer-card:active { transform: translateY(0); }
+
+.peer-emoji {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px; height: 56px;
+  margin-bottom: var(--sp-xs);
+  font-size: 32px;
+  line-height: 1;
+  background: var(--accent-light);
+  border-radius: 50%;
+}
+.peer-name {
+  width: 100%;
+  font-size: var(--fs-small);
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.peer-sub {
+  width: 100%;
+  font-size: 10px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (min-width: 720px) {
+  .peer-card { width: 110px; min-height: 124px; }
+  .peer-emoji { width: 64px; height: 64px; font-size: 36px; }
+  .peer-name { font-size: var(--fs-body); }
+}
+
+/* ============================================================
    ACCESSIBILITÉ
    ============================================================ */
 .btn:focus-visible,
 .pin-input:focus-visible,
 .drop-zone:focus-visible,
-.logout-btn:focus-visible {
+.logout-btn:focus-visible,
+.peer-card:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }

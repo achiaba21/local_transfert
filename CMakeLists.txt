@@ -59,6 +59,8 @@ ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/upload.js
                UploadJs "application/javascript; charset=utf-8" upload_js)
 ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/download.js
                DownloadJs "application/javascript; charset=utf-8" download_js)
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/peers.js
+               PeersJs "application/javascript; charset=utf-8" peers_js)
 ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/login.js
                LoginJs "application/javascript; charset=utf-8" login_js)
 ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/css/style.css
@@ -95,6 +97,7 @@ set(LTR_WEB_GEN_HEADERS
     ${common_js_GEN}
     ${upload_js_GEN}
     ${download_js_GEN}
+    ${peers_js_GEN}
     ${login_js_GEN}
     ${style_css_GEN}
     ${icon_upload_GEN}
@@ -156,6 +159,7 @@ add_library(ltr_core STATIC
     src/web/routes/upload_routes.cpp
     src/web/routes/download_routes.cpp
     src/web/routes/events_routes.cpp
+    src/web/routes/p2p_routes.cpp
     src/web/routes/self_routes.cpp
     src/web/routes/static_routes.cpp
 )

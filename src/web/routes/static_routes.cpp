@@ -14,6 +14,7 @@
 #include "ltr/web/assets/common_js.hpp"
 #include "ltr/web/assets/upload_js.hpp"
 #include "ltr/web/assets/download_js.hpp"
+#include "ltr/web/assets/peers_js.hpp"   // V1.2 — Sprint Web P2P
 #include "ltr/web/assets/login_js.hpp"
 #include "ltr/web/assets/style_css.hpp"
 #include "ltr/web/assets/icon_upload.hpp"
@@ -105,6 +106,10 @@ void registerStatic(WebService& svc) {
     });
     server.Get("/download.js", [](const httplib::Request&, httplib::Response& res) {
         serveStatic(res, DownloadJs, DownloadJsMime);
+    });
+    // V1.2 — Sprint Web P2P : annuaire JS.
+    server.Get("/peers.js", [](const httplib::Request&, httplib::Response& res) {
+        serveStatic(res, PeersJs, PeersJsMime);
     });
     server.Get("/style.css", [](const httplib::Request&, httplib::Response& res) {
         serveStatic(res, StyleCss, StyleCssMime);

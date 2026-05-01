@@ -37,9 +37,23 @@
       setupInstallBanner();
       startHeartbeat();
 
-      // Délègue aux modules dédiés (upload.js, download.js).
+      // Délègue aux modules dédiés (upload.js, download.js, peers.js).
       if (window.LTR.initUpload)   window.LTR.initUpload();
       if (window.LTR.initDownload) window.LTR.initDownload();
+      // V1.2 — Sprint Web P2P : annuaire + handler SSE web-peers.
+      if (window.LTR.peers && window.LTR.peers.init) {
+        window.LTR.peers.init();
+        if (window.LTR.addSseListener) {
+          window.LTR.addSseListener('web-peers', (ev) => {
+            try {
+              const data = JSON.parse(ev.data);
+              window.LTR.peers.setPeers(data.peers || []);
+            } catch (e) {
+              clientLog('error', '[app] bad web-peers payload');
+            }
+          });
+        }
+      }
     } catch (e) {
       clientLog('error', '[app] boot threw: ' + (e && e.message));
       goToLogin();
