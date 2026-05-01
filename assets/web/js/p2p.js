@@ -236,24 +236,34 @@
     dc.bufferedAmountLowThreshold = BUFFER_LOW;
     dc.onopen  = () => sendNextFile(state);
     dc.onerror = (e) => {
+      // Si tout a été envoyé avant l'erreur, c'est probablement le
+      // receveur qui a fermé sa pc → on traite comme succès, pas erreur.
+      if (state.allFilesSent) {
+        cleanup(state.peer.deviceId, '✓ Envoyé');
+        return;
+      }
       clientLog('error', '[p2p] dc error: ' + (e && e.message));
       cleanup(state.peer.deviceId, '✗ Erreur DataChannel');
     };
     dc.onclose = () => {
-      // Si tous les fichiers ont été envoyés, on cleanup avec succès.
-      if (state.currentFileIdx >= state.files.length) {
-        cleanup(state.peer.deviceId, '✓ Envoyé');
-      }
+      cleanup(state.peer.deviceId,
+              state.allFilesSent ? '✓ Envoyé' : '✗ Connexion fermée');
     };
   }
 
   async function sendNextFile(state) {
     if (state.currentFileIdx >= state.files.length) {
-      // Tout est envoyé — annoncer "all-done" puis fermer.
+      // Tout est envoyé — annoncer "all-done", attendre que le buffer
+      // soit vidé, puis fermer. Le flag allFilesSent permet à
+      // dc.onerror/onclose de traiter une fermeture distante comme
+      // succès au lieu d'erreur.
       try { state.dc.send(JSON.stringify({ kind: 'all-done' })); } catch {}
-      setTimeout(() => {
-        try { state.dc.close(); } catch {}
-      }, 200);
+      state.allFilesSent = true;
+      while (state.dc && state.dc.readyState === 'open'
+             && state.dc.bufferedAmount > 0) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      try { state.dc.close(); } catch {}
       return;
     }
     const file = state.files[state.currentFileIdx];
@@ -320,12 +330,17 @@
   function wireReceiverDc(dc, state) {
     dc.onopen  = () => clientLog('info', '[p2p] receiver dc open');
     dc.onerror = (e) => {
+      if (state.allDoneSeen) {
+        cleanup(state.peer.deviceId, '✓ Reçu');
+        return;
+      }
       clientLog('error', '[p2p] receiver dc error: ' + (e && e.message));
       cleanup(state.peer.deviceId, '✗ Erreur DataChannel');
     };
     dc.onclose = () => {
-      // À la fin réussie le sender émet all-done puis close —
-      // si on a tout reçu, considérer fini.
+      // Le sender ferme proprement après avoir flushé all-done.
+      cleanup(state.peer.deviceId,
+              state.allDoneSeen ? '✓ Reçu' : '✗ Connexion fermée');
     };
     dc.onmessage = (ev) => {
       const data = ev.data;
@@ -358,7 +373,15 @@
     } else if (msg.kind === 'file-end') {
       finalizeReceivedFile(state);
     } else if (msg.kind === 'all-done') {
-      cleanup(state.peer.deviceId, '✓ Reçu');
+      // Marque l'UI ✓ Reçu mais NE PAS fermer ici. C'est l'émetteur
+      // qui ferme proprement après flush ; notre dc.onclose finalisera
+      // le cleanup. Fermer ici = race qui fait apparaitre "Erreur
+      // DataChannel" côté émetteur.
+      state.allDoneSeen = true;
+      if (state.uiCard) {
+        const sub = state.uiCard.querySelector('.peer-sub');
+        if (sub) sub.textContent = '✓ Reçu';
+      }
     }
   }
 
@@ -401,12 +424,32 @@
 
   // ====================================================================
   // UI : modale réception (bottom-sheet mobile / modal desktop)
+  //
+  // File d'attente : si une offre arrive pendant qu'une modale est
+  // ouverte, on l'empile au lieu d'écraser. La 1ère décision traitée,
+  // on dépile la suivante. Sans ça, les listeners s'accumulent et un
+  // clic Accepter fait accepter plusieurs offres simultanément.
   // ====================================================================
+  let modalQueue = [];
+  let modalActive = false;
+
   function showIncomingModal(peer, decideCb) {
+    modalQueue.push({ peer, decideCb });
+    if (!modalActive) processModalQueue();
+  }
+
+  function processModalQueue() {
+    if (modalQueue.length === 0) {
+      modalActive = false;
+      return;
+    }
+    modalActive = true;
+    const { peer, decideCb } = modalQueue.shift();
+
     const modal = $('#p2p-incoming-modal');
     if (!modal) {
-      // Pas d'UI dispo — auto-refuse silencieusement.
       decideCb(false);
+      processModalQueue();
       return;
     }
     $('#p2p-incoming-emoji').textContent = peer.emoji;
@@ -415,26 +458,26 @@
     $('#p2p-incoming-sub').textContent  = peer.platformLabel;
     modal.hidden = false;
 
-    // Reset TTL bar animation
     const fill = $('#p2p-incoming-ttl-fill');
     if (fill) {
       fill.style.transition = 'none';
       fill.style.width = '100%';
-      // force reflow
       void fill.offsetWidth;
       fill.style.transition = `width ${ACCEPT_TTL_MS}ms linear`;
       fill.style.width = '0%';
     }
 
-    const onAccept = () => { close(); decideCb(true); };
-    const onRefuse = () => { close(); decideCb(false); };
+    const acceptBtn = $('#p2p-incoming-accept');
+    const refuseBtn = $('#p2p-incoming-refuse');
     function close() {
       modal.hidden = true;
-      $('#p2p-incoming-accept').removeEventListener('click', onAccept);
-      $('#p2p-incoming-refuse').removeEventListener('click', onRefuse);
+      acceptBtn.removeEventListener('click', onAccept);
+      refuseBtn.removeEventListener('click', onRefuse);
     }
-    $('#p2p-incoming-accept').addEventListener('click', onAccept);
-    $('#p2p-incoming-refuse').addEventListener('click', onRefuse);
+    function onAccept() { close(); decideCb(true);  processModalQueue(); }
+    function onRefuse() { close(); decideCb(false); processModalQueue(); }
+    acceptBtn.addEventListener('click', onAccept);
+    refuseBtn.addEventListener('click', onRefuse);
   }
 
   // ====================================================================
