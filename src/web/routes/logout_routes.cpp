@@ -24,6 +24,8 @@ void registerLogout(WebService& svc) {
                 svc.bus().post(core::PeerLostEvent{sess->deviceId});
             }
             svc.sessions().removeByToken(token);
+            // V1.2 — Sprint Web P2P : annoncer le départ aux autres.
+            svc.emitWebPeersToAll();
         }
         // Suppression du cookie côté navigateur.
         res.set_header("Set-Cookie",

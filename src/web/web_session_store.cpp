@@ -4,6 +4,7 @@
 
 #include "ltr/core/types.hpp"
 #include "ltr/domain/device.hpp"
+#include "ltr/web/display_name.hpp"
 
 namespace ltr::web {
 
@@ -80,6 +81,7 @@ std::optional<std::string> WebSessionStore::authenticate(
 
     const auto token = makeToken();
     const auto pa = parseUserAgent(userAgent);
+    const auto dn = DisplayName::fromDeviceIdAndUA(deviceId, userAgent);
 
     WebSession sess;
     sess.token     = token;
@@ -93,6 +95,11 @@ std::optional<std::string> WebSessionStore::authenticate(
     sess.device.kind         = domain::PeerKind::Web;
     sess.device.sessionToken = token;              // éphémère
     sess.device.lastSeen     = sess.lastSeen;
+
+    // V1.2 — Sprint Web P2P : auto-générés, stables (hash deviceId).
+    sess.displayName    = dn.name;
+    sess.emoji          = dn.emoji;
+    sess.platformLabel  = dn.platformLabel;
 
     {
         std::lock_guard<std::mutex> lock(mu_);
@@ -173,6 +180,28 @@ void WebSessionStore::removeByDeviceId(const std::string& deviceId) {
     if (it == deviceToToken_.end()) return;
     sessions_.erase(it->second);
     deviceToToken_.erase(it);
+}
+
+std::vector<WebSessionStore::PeerInfo>
+WebSessionStore::snapshotPeersFor(const std::string& excludeToken) const {
+    std::vector<PeerInfo> out;
+    std::lock_guard<std::mutex> lock(mu_);
+    out.reserve(sessions_.size());
+    for (const auto& [tok, s] : sessions_) {
+        if (tok == excludeToken) continue;
+        out.push_back({s.deviceId, s.displayName,
+                       s.emoji,    s.platformLabel});
+    }
+    return out;
+}
+
+std::optional<std::string>
+WebSessionStore::findTokenByDeviceId(const std::string& deviceId) const {
+    if (deviceId.empty()) return std::nullopt;
+    std::lock_guard<std::mutex> lock(mu_);
+    const auto it = deviceToToken_.find(deviceId);
+    if (it == deviceToToken_.end()) return std::nullopt;
+    return it->second;
 }
 
 } // namespace ltr::web

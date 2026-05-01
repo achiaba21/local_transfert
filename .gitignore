@@ -1,6 +1,7 @@
 # Build artefacts
 build/
 build-*/
+build.zip
 cmake-build-*/
 out/
 *.o

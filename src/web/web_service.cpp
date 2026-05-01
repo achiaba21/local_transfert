@@ -115,19 +115,50 @@ void WebService::keepaliveLoop() {
             bus_.post(core::PeerSeenEvent{s.device});
         }
 
-        for (const auto& ev : sessions_.evictExpired()) {
+        const auto evicted = sessions_.evictExpired();
+        for (const auto& ev : evicted) {
             core::log_info("[keepalive] EVICT session token="
                            + ev.token.substr(0, 8)
                            + " device=" + ev.deviceId.substr(0, 8));
             broadcaster_.detach(ev.token);
             bus_.post(core::PeerLostEvent{ev.deviceId});
         }
+        // V1.2 — Sprint Web P2P : si une session est tombée, ré-émettre
+        // l'annuaire pour que les autres voient le peer disparaître.
+        if (!evicted.empty()) emitWebPeersToAll();
 
         for (const auto& tkt : tickets_.evictExpired()) {
             core::log_info("[keepalive] EVICT ticket sess="
                            + tkt.sessionId + " name=" + tkt.displayName);
             bus_.post(core::TransferFailedEvent{tkt.sessionId, "expired"});
         }
+    }
+}
+
+void WebService::emitWebPeersTo(const std::string& token) {
+    if (token.empty()) return;
+    using nlohmann::json;
+    json payload;
+    payload["type"]  = "web-peers";
+    payload["peers"] = json::array();
+    for (const auto& p : sessions_.snapshotPeersFor(token)) {
+        json e;
+        e["deviceId"]      = p.deviceId;
+        e["displayName"]   = p.displayName;
+        e["emoji"]         = p.emoji;
+        e["platformLabel"] = p.platformLabel;
+        payload["peers"].push_back(std::move(e));
+    }
+    const auto data = payload.dump();
+    // SSE named event : permet au client d'utiliser
+    // `addEventListener('web-peers', …)` séparément du flux par défaut.
+    const auto msg = "event: web-peers\ndata: " + data + "\n\n";
+    broadcaster_.send(token, msg);
+}
+
+void WebService::emitWebPeersToAll() {
+    for (const auto& s : sessions_.snapshot()) {
+        emitWebPeersTo(s.token);
     }
 }
 

@@ -22,6 +22,11 @@ add_executable(test_web_session_dedup test_web_session_dedup.cpp)
 target_link_libraries(test_web_session_dedup PRIVATE ltr_core)
 add_test(NAME web_session_dedup COMMAND test_web_session_dedup)
 
+# V1.2 — Sprint Web P2P : nom auto stable (adjectif + animal + emoji).
+add_executable(test_display_name test_display_name.cpp)
+target_link_libraries(test_display_name PRIVATE ltr_core)
+add_test(NAME display_name COMMAND test_display_name)
+
 add_executable(test_download_ticket test_download_ticket.cpp)
 target_link_libraries(test_download_ticket PRIVATE ltr_core)
 add_test(NAME download_ticket COMMAND test_download_ticket)

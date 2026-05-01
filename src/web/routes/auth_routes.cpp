@@ -136,6 +136,10 @@ void registerAuth(WebService& svc) {
             svc.bus().post(core::PeerSeenEvent{s->device});
         }
 
+        // V1.2 — Sprint Web P2P : annonce le nouveau pair à toutes les
+        // autres sessions (et envoie au nouveau l'annuaire des autres).
+        svc.emitWebPeersToAll();
+
         // V1.1.1 : réponse 200 JSON au lieu de 302.
         // Raison : iOS Safari a un bug où le Set-Cookie d'une réponse 302
         // suivi par fetch(redirect:follow) peut ne pas être stocké. En
@@ -170,6 +174,12 @@ void registerAuth(WebService& svc) {
         j["deviceId"] = sess->deviceId;
         j["name"]     = sess->device.name;
         j["platform"] = sess->device.platform;
+        // V1.2 — Sprint Web P2P : nom auto-généré + emoji + sous-titre
+        // plateforme. Permet au JS de s'afficher lui-même de manière
+        // cohérente avec la liste des autres peers.
+        j["displayName"]   = sess->displayName;
+        j["emoji"]         = sess->emoji;
+        j["platformLabel"] = sess->platformLabel;
         res.set_content(j.dump(), "application/json");
     });
 }

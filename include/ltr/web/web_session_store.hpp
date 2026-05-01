@@ -63,6 +63,27 @@ public:
     // ré-authentifie, on invalide d'abord l'ancien token).
     void removeByDeviceId(const std::string& deviceId);
 
+    // V1.2 — Sprint Web P2P
+    // PeerInfo public exposé aux autres web devices via SSE web-peers.
+    // Ne contient PAS le token (interne) ni le UA brut.
+    struct PeerInfo {
+        std::string deviceId;
+        std::string displayName;
+        std::string emoji;
+        std::string platformLabel;
+    };
+
+    // Retourne la liste des sessions actives sauf celle pointée par
+    // excludeToken (typiquement la session du destinataire SSE).
+    std::vector<PeerInfo>
+    snapshotPeersFor(const std::string& excludeToken) const;
+
+    // Résout un deviceId vers son token actif (utilisé pour le routing
+    // signaling P2P : SSE vers le destinataire). std::nullopt si le
+    // device n'a pas de session active.
+    std::optional<std::string>
+    findTokenByDeviceId(const std::string& deviceId) const;
+
 private:
     mutable std::mutex mu_;
     std::map<std::string, WebSession> sessions_;        // token → session

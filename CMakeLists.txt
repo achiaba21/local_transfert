@@ -141,6 +141,7 @@ add_library(ltr_core STATIC
     src/web/http_server.cpp
     src/web/web_service.cpp
     src/web/web_session_store.cpp
+    src/web/display_name.cpp
     src/web/download_ticket_store.cpp
     src/web/sse_channel.cpp
     src/web/sse_broadcaster.cpp

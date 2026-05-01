@@ -73,6 +73,16 @@ public:
     std::shared_ptr<std::atomic<bool>>
     acquireCancelFlag(const std::string& sessionId);
 
+    // V1.2 — Sprint Web P2P : pousse l'évènement SSE `web-peers` vers
+    // une session spécifique (la liste des AUTRES sessions actives, hors
+    // celle pointée par `token`). Utilisé après auth/logout/eviction.
+    void emitWebPeersTo(const std::string& token);
+
+    // V1.2 — Sprint Web P2P : pousse l'évènement SSE `web-peers` vers
+    // toutes les sessions actives. Chaque session reçoit la liste des
+    // autres (jamais elle-même).
+    void emitWebPeersToAll();
+
     // Exposés pour les routes (accès contrôlé depuis route_registrar).
     WebSessionStore&         sessions()    { return sessions_; }
     DownloadTicketStore&     tickets()     { return tickets_; }
