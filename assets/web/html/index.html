@@ -98,12 +98,43 @@
 
 </main>
 
+<!-- V1.2 — Sprint Web P2P : modale réception (bottom-sheet mobile / centered desktop). -->
+<div class="p2p-modal" id="p2p-incoming-modal" hidden role="dialog"
+     aria-labelledby="p2p-incoming-title" aria-modal="true">
+  <div class="p2p-modal-backdrop"></div>
+  <div class="p2p-sheet">
+    <div class="p2p-sheet-handle" aria-hidden="true"></div>
+    <div class="p2p-incoming-emoji" id="p2p-incoming-emoji">🐧</div>
+    <h2 class="p2p-incoming-title" id="p2p-incoming-title">…</h2>
+    <p class="p2p-incoming-sub"   id="p2p-incoming-sub">…</p>
+    <div class="p2p-ttl-bar"><span id="p2p-incoming-ttl-fill"></span></div>
+    <div class="p2p-actions">
+      <button type="button" class="btn btn-secondary"
+              id="p2p-incoming-refuse">Refuser</button>
+      <button type="button" class="btn btn-primary"
+              id="p2p-incoming-accept">Accepter</button>
+    </div>
+  </div>
+</div>
+
+<!-- Sticky bar bas pendant un transfert P2P actif. -->
+<div class="p2p-sticky-bar" id="p2p-sticky-bar" hidden role="status"
+     aria-live="polite">
+  <span class="p2p-sticky-icon" aria-hidden="true">↑</span>
+  <span class="p2p-sticky-text">…</span>
+</div>
+
+<!-- Toast non bloquant (refus, erreurs ICE). -->
+<div class="p2p-toast" id="p2p-toast" hidden role="status"
+     aria-live="polite"></div>
+
 <!-- Ordre de chargement : common.js (utilitaires) d'abord, puis modules,
      puis app.js qui orchestre. Tous en defer pour conserver l'ordre. -->
 <script src="/common.js"   defer></script>
 <script src="/upload.js"   defer></script>
 <script src="/download.js" defer></script>
 <script src="/peers.js"    defer></script>
+<script src="/p2p.js"      defer></script>
 <script src="/app.js"      defer></script>
 </body>
 </html>

@@ -15,6 +15,7 @@
 #include "ltr/web/assets/upload_js.hpp"
 #include "ltr/web/assets/download_js.hpp"
 #include "ltr/web/assets/peers_js.hpp"   // V1.2 — Sprint Web P2P
+#include "ltr/web/assets/p2p_js.hpp"     // V1.2 — Sprint Web P2P
 #include "ltr/web/assets/login_js.hpp"
 #include "ltr/web/assets/style_css.hpp"
 #include "ltr/web/assets/icon_upload.hpp"
@@ -110,6 +111,10 @@ void registerStatic(WebService& svc) {
     // V1.2 — Sprint Web P2P : annuaire JS.
     server.Get("/peers.js", [](const httplib::Request&, httplib::Response& res) {
         serveStatic(res, PeersJs, PeersJsMime);
+    });
+    // V1.2 — Sprint Web P2P : module WebRTC DataChannel.
+    server.Get("/p2p.js", [](const httplib::Request&, httplib::Response& res) {
+        serveStatic(res, P2pJs, P2pJsMime);
     });
     server.Get("/style.css", [](const httplib::Request&, httplib::Response& res) {
         serveStatic(res, StyleCss, StyleCssMime);

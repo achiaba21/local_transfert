@@ -584,6 +584,156 @@ body.page-main {
   .peer-name { font-size: var(--fs-body); }
 }
 
+/* État pendant un transfert P2P actif : barre de progression. */
+.peer-card--sending {
+  border-color: var(--accent);
+}
+.peer-progress-bar {
+  width: 100%;
+  height: 3px;
+  margin-top: var(--sp-xs);
+  background: var(--separator);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+.peer-progress-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 200ms ease-out;
+}
+
+/* ============================================================
+   V1.2 — Modale réception P2P (bottom-sheet mobile, modal desktop)
+   ============================================================ */
+.p2p-modal {
+  position: fixed; inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: flex-end;       /* bottom-sheet par défaut */
+  justify-content: center;
+}
+.p2p-modal[hidden] { display: none; }
+
+.p2p-modal-backdrop {
+  position: absolute; inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+}
+.p2p-sheet {
+  position: relative;
+  width: 100%;
+  max-width: 480px;
+  padding: var(--sp-md) var(--sp-xl) var(--sp-xl);
+  background: var(--surface);
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.18);
+  animation: p2p-slide-up 220ms ease-out;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.p2p-sheet-handle {
+  width: 40px; height: 4px;
+  margin-bottom: var(--sp-md);
+  background: var(--separator);
+  border-radius: var(--r-pill);
+}
+.p2p-incoming-emoji {
+  font-size: 56px;
+  margin-bottom: var(--sp-sm);
+  line-height: 1;
+}
+.p2p-incoming-title {
+  margin: 0 0 var(--sp-xs);
+  font-size: var(--fs-h2);
+  font-weight: 700;
+  color: var(--text);
+}
+.p2p-incoming-sub {
+  margin: 0 0 var(--sp-md);
+  color: var(--text-secondary);
+  font-size: var(--fs-small);
+}
+.p2p-ttl-bar {
+  width: 100%;
+  height: 3px;
+  margin: var(--sp-sm) 0 var(--sp-md);
+  background: var(--separator);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+.p2p-ttl-bar > span {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: var(--warning);
+}
+.p2p-actions {
+  width: 100%;
+  display: flex;
+  gap: var(--sp-md);
+}
+.p2p-actions .btn { flex: 1; min-height: 44px; }
+
+@keyframes p2p-slide-up {
+  from { transform: translateY(100%); opacity: 0.6; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+@media (min-width: 720px) {
+  .p2p-modal { align-items: center; }
+  .p2p-sheet {
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow);
+    max-width: 480px;
+    animation: p2p-fade-in 200ms ease-out;
+    padding: var(--sp-xl);
+  }
+  .p2p-sheet-handle { display: none; }
+  @keyframes p2p-fade-in {
+    from { transform: scale(0.96); opacity: 0; }
+    to   { transform: scale(1);    opacity: 1; }
+  }
+}
+
+/* Sticky bar bas pendant un transfert P2P actif. */
+.p2p-sticky-bar {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding: var(--sp-md) var(--sp-lg);
+  background: var(--accent);
+  color: #fff;
+  font-size: var(--fs-small);
+  font-weight: 600;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.12);
+}
+.p2p-sticky-bar[hidden] { display: none; }
+.p2p-sticky-icon { font-size: 16px; }
+.p2p-sticky-text { flex: 1; }
+
+/* Toast non bloquant. */
+.p2p-toast {
+  position: fixed;
+  left: 50%;
+  bottom: var(--sp-xl);
+  transform: translateX(-50%);
+  z-index: 60;
+  padding: var(--sp-sm) var(--sp-lg);
+  background: var(--text);
+  color: #fff;
+  border-radius: var(--r-md);
+  font-size: var(--fs-small);
+  box-shadow: var(--shadow);
+}
+.p2p-toast[hidden] { display: none; }
+.p2p-toast[data-kind="warning"] { background: var(--warning); }
+.p2p-toast[data-kind="error"]   { background: var(--error); }
+
 /* ============================================================
    ACCESSIBILITÉ
    ============================================================ */

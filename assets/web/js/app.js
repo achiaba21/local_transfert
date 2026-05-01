@@ -52,6 +52,14 @@
               clientLog('error', '[app] bad web-peers payload');
             }
           });
+          window.LTR.addSseListener('p2p-signal', (ev) => {
+            try {
+              const data = JSON.parse(ev.data);
+              if (window.LTR.p2p) window.LTR.p2p.handleSignal(data);
+            } catch (e) {
+              clientLog('error', '[app] bad p2p-signal payload');
+            }
+          });
         }
       }
     } catch (e) {
@@ -63,6 +71,11 @@
   // ==================== LOGOUT ====================
   function setupLogout() {
     $('#logout-btn').addEventListener('click', async () => {
+      // V1.2 — Sprint Web P2P : ferme proprement les RTCPeerConnection
+      // avant logout pour éviter les half-open connections.
+      if (window.LTR.p2p && window.LTR.p2p.cleanupAll) {
+        window.LTR.p2p.cleanupAll();
+      }
       try {
         await fetch('/api/logout',
           { method: 'POST', credentials: 'same-origin' });
