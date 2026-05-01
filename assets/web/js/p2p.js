@@ -108,6 +108,16 @@
         await state.pc.setRemoteDescription(payload.sdp);
       } catch (e) { clientLog('error', '[p2p] setRemote(answer): ' + e); }
     } else if (type === 'ice') {
+      // Si la pc n'est pas encore créée (receveur qui n'a pas encore
+      // cliqué Accepter), file les candidates pour les drainer plus tard.
+      // Sans ça, les ICE candidates initiales du sender sont perdues
+      // → la connexion ne s'établit jamais.
+      if (!state.pc) {
+        if (state.pendingIceQueue) {
+          state.pendingIceQueue.push(payload.candidate);
+        }
+        return;
+      }
       try {
         await state.pc.addIceCandidate(payload.candidate);
       } catch (e) { /* ignore — candidates can fail benignly */ }
@@ -193,6 +203,10 @@
           { candidate: ev.candidate.toJSON ? ev.candidate.toJSON() : ev.candidate });
       }
     };
+    pc.oniceconnectionstatechange = () => {
+      clientLog('info', '[p2p] ice=' + pc.iceConnectionState
+                       + ' for ' + state.peer.deviceId.substring(0, 8));
+    };
     pc.onconnectionstatechange = () => {
       const cs = pc.connectionState;
       clientLog('info', '[p2p] pc state=' + cs
@@ -204,6 +218,15 @@
         // de l'API native, qui passera failed/closed.
       }
     };
+    // Fallback : si on n'atteint pas 'connected' en 20 s, on coupe avec
+    // un message clair plutôt que de rester bloqué à 0 %.
+    state.connectTimer = setTimeout(() => {
+      if (pc.connectionState !== 'connected') {
+        clientLog('warn', '[p2p] connect timeout (state='
+                         + pc.connectionState + ')');
+        cleanup(state.peer.deviceId, '✗ Pas de route LAN');
+      }
+    }, 20000);
   }
 
   // ====================================================================
@@ -493,6 +516,7 @@
       }, 3000);
     }
     if (state.ttlTimer) clearTimeout(state.ttlTimer);
+    if (state.connectTimer) clearTimeout(state.connectTimer);
     conns.delete(deviceId);
     refreshSticky();
   }
