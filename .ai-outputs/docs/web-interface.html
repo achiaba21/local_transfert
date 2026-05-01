@@ -212,7 +212,7 @@
     <h1>Interface Web embarquée</h1>
     <p class="subtitle">Échange de fichiers LAN via navigateur, sans installation</p>
   </div>
-  <span class="badge ok">V1.1 livrée · 7/7 tests</span>
+  <span class="badge ok">V1.2 livrée · 14/14 tests</span>
 </header>
 
 <p class="meta">
@@ -683,6 +683,30 @@ Web (pill "Web" accent-light, radius pill) :
 
 <!-- ==================== 11. CHANGELOG ==================== -->
 <h2 id="changelog">11. Changelog</h2>
+
+<h3>V1.2 — 2026-05-01 <span class="badge accent">LIVRÉE</span> · Sprint Web P2P</h3>
+<p>
+  Plusieurs navigateurs auth sur le même host se voient mutuellement et
+  s'envoient des fichiers en <strong>vrai P2P via WebRTC DataChannel</strong>.
+  Les fichiers ne transitent plus par le host — il ne fait que du
+  <em>signaling</em> (relay des SDP offer/answer + ICE candidates).
+</p>
+<ul>
+  <li>✅ <strong>Annuaire mutuel</strong> via SSE <code>web-peers</code> : chaque session reçoit la liste des autres devices auth (deviceId + displayName + emoji + platformLabel)</li>
+  <li>✅ <strong>Nom auto-généré stable</strong> : <code>DisplayName</code> hash FNV-1a du device_id → adjectif + animal FR + emoji (« 🦊 Pingouin Bleu »). 30×30 = 900 combinaisons stables</li>
+  <li>✅ <strong>Signaling sécurisé</strong> : <code>POST /api/p2p/signal</code> valide expéditeur (cookie) + destinataire (deviceToToken_) ; whitelist 6 types (offer/answer/ice/refuse/cancel/bye) ; self-target bloqué</li>
+  <li>✅ <strong>WebRTC DataChannel</strong> : RTCPeerConnection LAN-only ({iceServers: []}), DataChannel ordered, chunking 64 KB, backpressure (bufferedAmount &lt; 1 MB), reconstruction Blob → auto-download</li>
+  <li>✅ <strong>UI mobile-first</strong> : pucks horizontaux scroll-snap, modale réception bottom-sheet (mobile) / centered (desktop ≥720px), TTL 60s, sticky bar bas, toast non bloquant</li>
+  <li>✅ <strong>Multi-channels</strong> : un appareil peut envoyer à N destinataires en parallèle (Map&lt;deviceId, ConnectionState&gt;)</li>
+  <li>✅ <strong>Cleanup propre</strong> : pc.close + dc.close + clearTimeout au logout / done / failed / refuse</li>
+  <li>✅ <strong>14/14 tests passent</strong> : +<code>display_name</code> (déterminisme, parsing UA, fallback) +<code>p2p_signal_routes</code> (401/400×3/404/204)</li>
+</ul>
+<p class="meta">
+  Détails : <a href="../specs/web-p2p/business-spec.md">business-spec V1.2</a>,
+  <a href="../specs/web-p2p/architecture.md">architecture V1.2</a>,
+  <a href="../specs/web-p2p/ui-proposal.md">ui-proposal V1.2</a>,
+  <a href="../specs/web-p2p/audit-report.md">audit V1.2 (85/100 ✅)</a>.
+</p>
 
 <h3>V1.1.8 — 2026-04-24 <span class="badge accent">LIVRÉE</span></h3>
 <p>

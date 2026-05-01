@@ -3,6 +3,126 @@
 > Guide central pour tout agent / session Claude qui travaille sur la
 > couche `ltr::web`. Lire avant toute modification.
 
+## 🆕 V1.2 — Sprint Web P2P (2026-05-01)
+
+### Web↔web direct via WebRTC DataChannel
+
+Plusieurs navigateurs auth sur un même host peuvent désormais :
+
+- **Se voir mutuellement** dans une section « À envoyer à… »
+  (pucks horizontaux scroll-snap, mobile-first)
+- **S'envoyer des fichiers en P2P** sans que le payload transite par
+  le host. Le host n'est qu'un signaling : relay des SDP offer/answer
+  + ICE candidates via SSE.
+
+### Identité visible : DisplayName
+
+Nouveau utilitaire `ltr::web::DisplayName` (`display_name.hpp/.cpp`) :
+hash FNV-1a du `device_id` → adjectif + animal FR + emoji
+(ex. « 🦊 Pingouin Bleu »). 30×30 = 900 combinaisons stables. Le
+`platformLabel` est dérivé du UA (« iPhone · Safari »). Les 3 champs
+sont stockés dans `WebSession` à l'auth et exposés via :
+- `/api/me` (la session courante elle-même)
+- `web-peers` SSE (les autres sessions visibles)
+
+### Annuaire SSE `web-peers`
+
+Nouvel évènement nommé. Format :
+```
+event: web-peers
+data: {"type":"web-peers","peers":[{"deviceId","displayName","emoji","platformLabel"}]}
+```
+Émis automatiquement après auth, logout, et après chaque éviction de
+session expirée. Chaque session reçoit la liste des AUTRES (jamais
+elle-même). Le frontend (`peers.js`) maintient la liste locale et render.
+
+API store : `WebSessionStore::snapshotPeersFor(excludeToken)` →
+`vector<PeerInfo>` ; `findTokenByDeviceId(deviceId)` → token actif (pour
+le routing P2P).
+
+### Signaling : `POST /api/p2p/signal`
+
+Body JSON `{ "to": "<deviceId>", "type", "payload" }`. Types autorisés :
+`offer | answer | ice | refuse | cancel | bye`. Le host :
+1. Vérifie le cookie → identifie l'expéditeur
+2. Refuse self-target (A→A)
+3. Résout `to` via `findTokenByDeviceId`
+4. Construit `event: p2p-signal\ndata: {from,type,payload}\n\n`
+5. Envoie via `SseBroadcaster::send(targetToken, msg)`
+
+Aucune persistance : pure relay. Codes : 401 / 400 / 404 / 204.
+
+### Frontend WebRTC (`assets/web/js/p2p.js`, ~520 LOC)
+
+Module standalone avec `Map<deviceId, ConnectionState>`. Gère N
+connexions parallèles (Q7 du BA — multi-destinataires autorisé).
+
+**Sender** :
+- `RTCPeerConnection({iceServers: []})` — LAN-only V1
+- `createDataChannel('ltr', {ordered: true})` + binaryType arraybuffer
+- `createOffer` → `setLocalDescription` → POST `/api/p2p/signal` type=offer
+- À `dc.onopen` : `file.stream().getReader()` + chunking 64 Ko
+- Backpressure : attendre `bufferedAmount < 1 Mo` (event
+  `bufferedamountlow`, fallback setTimeout 200 ms)
+- Annonce JSON `session-meta` → `file-meta` → binary chunks → `file-end`
+  → ... → `all-done` → close
+
+**Receiver** :
+- À l'`offer` reçu, modale « Accepter ? » avec TTL 60 s
+- Si accepté : crée pc, `ondatachannel` → wireReceiverDc, setRemote +
+  createAnswer → POST `/api/p2p/signal` type=answer
+- ICE trickle des deux côtés via `onicecandidate` → postSignal('ice')
+- `dc.onmessage` : si string → JSON control (`session-meta`/`file-meta`/
+  `file-end`/`all-done`) ; si binaire → push chunk
+- `file-end` → `Blob` + `URL.createObjectURL` + auto-download
+
+**Cleanup** : `pc.close + dc.close + clearTimeout TTL + restore UI` au
+`failed`/`refuse`/`logout`/`done`. Logout déclenche `cleanupAll()` avant
+POST `/api/logout`.
+
+### UI mobile-first
+
+- **Section peers** : pucks 96×110 px scroll-snap horizontal, emoji
+  56 px Radius::full, sub plateforme tronquée. ≥720 px : 110×124.
+- **Modale réception** : bottom-sheet mobile (slide-up 220 ms
+  ease-out, drag-handle visuelle), modal centré desktop (≥720 px,
+  fade-in scale). TTL bar warning shrink en 60 s.
+- **Sticky bar bas** pendant transfert P2P actif : « ↑ N transferts P2P
+  · X % ». Cumul multi-channels.
+- **Card peer en envoi** : barre de progression 3 px en bas + sub
+  remplacé par « 67 % · 8 Mo/s » + bordure accent.
+- **Toast non bloquant** pour notifs (refus, ICE failed).
+
+### Fichiers ajoutés
+
+- `include/ltr/web/display_name.hpp` + `src/web/display_name.cpp`
+- `include/ltr/web/routes/p2p_routes.hpp` + `src/web/routes/p2p_routes.cpp`
+- `assets/web/js/peers.js` (annuaire) + `p2p.js` (WebRTC)
+- `tests/test_display_name.cpp` (5 cas)
+- `tests/test_p2p_signal_routes.cpp` (6 cas : 401/400×3/404/204)
+
+### ICE config — LAN-only V1
+
+`{iceServers: []}` — pas de STUN public, pas de TURN. Si les 2 devices
+sont sur le même Wi-Fi/LAN, les host candidates suffisent. Cross-LAN
+hors scope V1 (Q5 du BA).
+
+### Sécurité
+
+- Le host **ne lit jamais** le payload SDP/ICE (relay opaque)
+- Pas de fuite cross-session : chaque message SSE p2p-signal envoyé au
+  seul destinataire
+- Self-target bloqué (400)
+- Whitelist 6 types — refus 400 sur types arbitraires
+
+### Tests V1.2 : 14/14 passent
+- protocol, hash, web_session_store, web_session_dedup, download_ticket,
+  qr_code, http_smoke, streaming_zip, resume_sidecar, layout_box,
+  breakpoint, label_ellipsis (12 V1.1)
+- **display_name, p2p_signal_routes** (2 nouveaux V1.2)
+
+---
+
 ## 🆕 V1.1.8 — Changements notables (2026-04-24)
 
 ### ZIP streamé à la volée (host → web) — suppression du fichier temp
