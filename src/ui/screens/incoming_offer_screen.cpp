@@ -7,6 +7,7 @@
 #include "ltr/ui/widgets/card.hpp"
 #include "ltr/ui/widgets/label.hpp"
 
+#include <algorithm>
 #include <sstream>
 
 namespace ltr::ui {
@@ -223,6 +224,13 @@ void IncomingOfferScreen::draw(sf::RenderTarget& target) const {
         // Lignes des demandes.
         const float listY0 = cardY + 80.f;
         constexpr float kRowBtnW = 90.f, kRowBtnH = 28.f;
+        // V1.1.10 : largeur max du texte = du début du label jusqu'au
+        // bord gauche du bouton « Refuser » moins une petite marge.
+        const float textLeft  = cardX + Spacing::lg + Spacing::md;
+        const float btnsLeft  = cardX + w - 2 * (kRowBtnW + Spacing::sm)
+                                 - Spacing::lg;
+        const float textMaxW  = std::max(40.f,
+                                          btnsLeft - textLeft - Spacing::md);
         for (std::size_t i = 0; i < st.webInbox.size()
                                 && i < static_cast<std::size_t>(maxRows);
              ++i) {
@@ -239,7 +247,8 @@ void IncomingOfferScreen::draw(sf::RenderTarget& target) const {
                        + entry.firstFileName)
               .setBold(true).setSize(FontSize::body)
               .setColor(Colors::text)
-              .setPosition(cardX + Spacing::lg + Spacing::md, ry + 8.f);
+              .setMaxWidth(textMaxW).setEllipsis(true)
+              .setPosition(textLeft, ry + 8.f);
             l1.draw(target);
 
             // Sous-titre : taille + count
@@ -251,7 +260,8 @@ void IncomingOfferScreen::draw(sf::RenderTarget& target) const {
             l2.setText(sub.str())
               .setSize(FontSize::small)
               .setColor(Colors::textSecondary)
-              .setPosition(cardX + Spacing::lg + Spacing::md, ry + 32.f);
+              .setMaxWidth(textMaxW).setEllipsis(true)
+              .setPosition(textLeft, ry + 32.f);
             l2.draw(target);
 
             // Boutons row
