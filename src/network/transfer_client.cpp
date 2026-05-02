@@ -63,11 +63,20 @@ std::string TransferClient::resumeSession(
     // négociation ResumeOffer/ResumeResponse + skipBytes pour continuer
     // aux offsets partials existants.
     auto ctx = std::make_shared<WorkerCtx>();
+    // Crash V1.4.4 : si workers_[sessionId] était déjà occupé par le
+    // worker précédent (cas resume après un envoi échoué), écraser
+    // le shared_ptr déclenchait le dtor du WorkerCtx → dtor du
+    // std::thread encore joinable → std::terminate() → SIGABRT.
+    // On extrait l'ancien sous lock, puis on join HORS du lock.
+    std::shared_ptr<WorkerCtx> old;
     {
         std::lock_guard<std::mutex> lock(mu_);
-        // L'ancien worker (s'il existe encore) sera nettoyé par
-        // ~TransferClient ; on réinsère le nouveau ctx sous le même sid.
+        auto it = workers_.find(sessionId);
+        if (it != workers_.end()) old = it->second;
         workers_[sessionId] = ctx;
+    }
+    if (old && old->thread.joinable()) {
+        old->thread.join();   // immédiat si runSender a déjà return
     }
     ctx->thread = std::thread(
         [this, sessionId, peer, files, pinCode, ctx]() {
@@ -77,6 +86,11 @@ std::string TransferClient::resumeSession(
                 core::log_error(std::string("resumeSession: ") + e.what());
                 bus_.post(core::TransferFailedEvent{sessionId,
                     std::string("exception: ") + e.what(),
+                    core::ErrorCategory::Unknown});
+            } catch (...) {
+                core::log_error("resumeSession: exception inconnue");
+                bus_.post(core::TransferFailedEvent{sessionId,
+                    "exception inconnue",
                     core::ErrorCategory::Unknown});
             }
         });
