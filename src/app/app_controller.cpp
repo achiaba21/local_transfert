@@ -4,8 +4,12 @@
 #include "ltr/core/shell_open.hpp"
 #include "ltr/core/types.hpp"
 #include "ltr/infra/filesystem_service.hpp"
+#include "ltr/ui/clipboard_paste.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <ctime>
+#include <fstream>
 #include <random>
 #include <sstream>
 
@@ -24,6 +28,48 @@ std::string lastPathComponent(const std::filesystem::path& p) {
     const auto pos = s.find_last_of("/\\");
     const auto name = (pos == std::string::npos) ? s : s.substr(pos + 1);
     return name.empty() ? p.string() : name;
+}
+
+// V1.4 — Sprint Clipboard Paste : helpers (avant start() qui les utilise).
+std::string nowTimestamp() {
+    const auto t  = std::chrono::system_clock::now();
+    const auto tt = std::chrono::system_clock::to_time_t(t);
+    std::tm tm{};
+#if defined(_WIN32)
+    localtime_s(&tm, &tt);
+#else
+    localtime_r(&tt, &tm);
+#endif
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%04d%02d%02d-%02d%02d%02d",
+                  tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+                  tm.tm_hour, tm.tm_min, tm.tm_sec);
+    return buf;
+}
+
+void ensureClipboardTempDir(const std::filesystem::path& dir) {
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    if (ec) {
+        core::log_warn("clipboard tempDir create: " + ec.message());
+    }
+}
+
+void purgeOldClipboardTemp(const std::filesystem::path& dir) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if (!fs::exists(dir, ec)) return;
+    const auto now = fs::file_time_type::clock::now();
+    const auto threshold = now - std::chrono::hours(24);
+    for (auto it = fs::directory_iterator(dir, ec);
+         it != fs::directory_iterator(); ++it) {
+        std::error_code itec;
+        const auto t = fs::last_write_time(it->path(), itec);
+        if (!itec && t < threshold) {
+            std::error_code rmec;
+            fs::remove(it->path(), rmec);
+        }
+    }
 }
 
 std::string formatPin(const std::string& raw) {
@@ -64,6 +110,13 @@ void AppController::start() {
     server_->start();
     discovery_->start();
     web_->start();
+
+    // V1.4 — Sprint Clipboard Paste : prépare le dossier temp et purge
+    // les fichiers > 24h d'une exécution précédente.
+    const auto cbDir = clipboardTempDir();
+    ensureClipboardTempDir(cbDir);
+    purgeOldClipboardTemp(cbDir);
+
     core::log_info("AppController démarré — device_id=" + cfg_.deviceId);
 }
 
@@ -281,6 +334,71 @@ void AppController::requestSend() {
         bus_.post(core::LogEvent{"error", std::string("Envoi: ") + e.what()});
     } catch (...) {
         core::log_error("requestSend exception inconnue");
+    }
+}
+
+// V1.4 — Sprint Clipboard Paste : dossier temp dédié pour fichiers
+// texte/image générés depuis le presse-papier. Cleanup au boot
+// (>24 h), au shutdown, et après chaque envoi terminé.
+std::filesystem::path AppController::clipboardTempDir() const {
+    namespace fs = std::filesystem;
+    return fs::temp_directory_path() / "ltr-clipboard";
+}
+
+void AppController::pasteFromClipboard() {
+    namespace fs = std::filesystem;
+
+    auto paste = ui::readClipboard();
+    using K = ui::ClipboardPaste::Kind;
+
+    if (paste.kind == K::None) {
+        bus_.post(core::LogEvent{"info", "Presse-papier vide"});
+        return;
+    }
+
+    if (paste.kind == K::Files) {
+        addFiles(paste.files);
+        bus_.post(core::LogEvent{"info",
+            std::to_string(paste.files.size())
+            + " fichier(s) ajouté(s) depuis le presse-papier"});
+        return;
+    }
+
+    // Text ou Image : on écrit un fichier temp et on le passe à addFiles.
+    const auto dir = clipboardTempDir();
+    ensureClipboardTempDir(dir);
+
+    fs::path target;
+    if (paste.kind == K::Text) {
+        target = dir / ("clipboard-" + nowTimestamp() + ".txt");
+        std::ofstream ofs(target, std::ios::binary);
+        if (!ofs) {
+            bus_.post(core::LogEvent{"error",
+                "Coller: impossible d'écrire le fichier temp"});
+            return;
+        }
+        ofs.write(paste.text.data(),
+                  static_cast<std::streamsize>(paste.text.size()));
+        ofs.close();
+        addFiles({target});
+        bus_.post(core::LogEvent{"info", "Texte ajouté · "
+            + std::to_string(paste.text.size()) + " octets"});
+    } else if (paste.kind == K::Image) {
+        const auto ext = paste.imageExt.empty() ? "png" : paste.imageExt;
+        target = dir / ("clipboard-" + nowTimestamp() + "." + ext);
+        std::ofstream ofs(target, std::ios::binary);
+        if (!ofs) {
+            bus_.post(core::LogEvent{"error",
+                "Coller: impossible d'écrire le fichier temp"});
+            return;
+        }
+        ofs.write(reinterpret_cast<const char*>(paste.imageBytes.data()),
+                  static_cast<std::streamsize>(paste.imageBytes.size()));
+        ofs.close();
+        addFiles({target});
+        bus_.post(core::LogEvent{"info",
+            "Image " + std::string(ext) + " ajoutée · "
+            + std::to_string(paste.imageBytes.size()) + " octets"});
     }
 }
 
@@ -695,6 +813,7 @@ void AppController::onEvent(const core::Event& ev) {
             // V1.1 : auto-clean des fichiers envoyés pour cette session.
             auto it = sessionPaths_.find(e.sessionId);
             if (it != sessionPaths_.end()) {
+                const auto cbDir = clipboardTempDir();
                 for (const auto& p : it->second) {
                     auto& list = state_.selectedFiles;
                     for (auto fit = list.begin(); fit != list.end(); ) {
@@ -709,6 +828,14 @@ void AppController::onEvent(const core::Event& ev) {
                         } else {
                             ++fit;
                         }
+                    }
+                    // V1.4 — Sprint Clipboard Paste : si le path est un
+                    // fichier temp clipboard, on le supprime physiquement
+                    // après envoi réussi (texte/image collé).
+                    std::error_code ec;
+                    if (p.parent_path() == cbDir
+                        && std::filesystem::exists(p, ec)) {
+                        std::filesystem::remove(p, ec);
                     }
                 }
                 sessionPaths_.erase(it);

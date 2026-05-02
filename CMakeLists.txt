@@ -198,6 +198,17 @@ else()
     set(LTR_DRAG_DROP_SRC src/ui/drag_drop_stub.cpp)
 endif()
 
+# V1.4 — Sprint Clipboard Paste : presse-papier natif, même pattern.
+if(APPLE)
+    set(LTR_CLIPBOARD_SRC src/ui/clipboard_paste_mac.mm)
+    set_source_files_properties(src/ui/clipboard_paste_mac.mm PROPERTIES
+        COMPILE_FLAGS "-fobjc-arc -Wno-deprecated-declarations")
+elseif(WIN32)
+    set(LTR_CLIPBOARD_SRC src/ui/clipboard_paste_win.cpp)
+else()
+    set(LTR_CLIPBOARD_SRC src/ui/clipboard_paste_stub.cpp)
+endif()
+
 # --- ui -----------------------------------------------------------------------
 add_library(ltr_ui STATIC
     src/ui/theme.cpp
@@ -224,6 +235,7 @@ add_library(ltr_ui STATIC
     src/ui/screens/main_screen.cpp
     src/ui/screens/incoming_offer_screen.cpp
     ${LTR_DRAG_DROP_SRC}
+    ${LTR_CLIPBOARD_SRC}
 )
 target_include_directories(ltr_ui PUBLIC include)
 target_link_libraries(ltr_ui

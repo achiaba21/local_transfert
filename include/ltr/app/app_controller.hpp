@@ -50,6 +50,12 @@ public:
     void toggleFileCheck(const std::filesystem::path& absolutePath);
     void cancelPending(const std::string& sessionId);
 
+    // V1.4 — Sprint Clipboard Paste : lit le presse-papier et ajoute
+    // son contenu à la liste des fichiers à envoyer (texte/image/file).
+    // Les fichiers temp (texte, image) sont écrits dans clipboardTempDir().
+    void pasteFromClipboard();
+    std::filesystem::path clipboardTempDir() const;
+
     void acceptIncoming();
     void rejectIncoming();
     void cancelSession(const std::string& sessionId);

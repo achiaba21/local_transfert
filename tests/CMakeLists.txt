@@ -32,6 +32,11 @@ add_executable(test_p2p_signal_routes test_p2p_signal_routes.cpp)
 target_link_libraries(test_p2p_signal_routes PRIVATE ltr_core cpphttplib)
 add_test(NAME p2p_signal_routes COMMAND test_p2p_signal_routes)
 
+# V1.4 — Sprint Clipboard Paste : invariants de l'API readClipboard.
+add_executable(test_clipboard_stub test_clipboard_stub.cpp)
+target_link_libraries(test_clipboard_stub PRIVATE ltr_ui)
+add_test(NAME clipboard_stub COMMAND test_clipboard_stub)
+
 add_executable(test_download_ticket test_download_ticket.cpp)
 target_link_libraries(test_download_ticket PRIVATE ltr_core)
 add_test(NAME download_ticket COMMAND test_download_ticket)

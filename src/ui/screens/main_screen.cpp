@@ -59,6 +59,16 @@ MainScreen::MainScreen(app::AppController& controller)
     addMenu_.setItems({
         {"Fichiers...", [this]{ openFilesPicker(); }},
         {"Dossier...",  [this]{ openFolderPicker(); }},
+        // V1.4 — Sprint Clipboard Paste : 3e entrée. Le hint clavier
+        // ⌘V/Ctrl+V est documenté dans le tooltip / docs (le
+        // DropdownMenu actuel n'affiche pas de hint à droite).
+#if defined(__APPLE__)
+        {"\xF0\x9F\x93\x8B  Coller (\xE2\x8C\x98V)",
+         [this]{ controller_.pasteFromClipboard(); }},
+#else
+        {"\xF0\x9F\x93\x8B  Coller (Ctrl+V)",
+         [this]{ controller_.pasteFromClipboard(); }},
+#endif
     });
 
     sendBtn_.setLabel("ENVOYER").setVariant(Button::Variant::Primary)
@@ -198,6 +208,17 @@ void MainScreen::handleEvent(const sf::Event& e, const app::AppState& state) {
     // V1.1.8-UX1 : le menu a priorité s'il est ouvert (capte clic + moves).
     if (addMenu_.isOpen()) {
         if (addMenu_.handleEvent(e)) return;
+    }
+
+    // V1.4 — Sprint Clipboard Paste : raccourci global Cmd+V (macOS) /
+    // Ctrl+V (Windows/Linux). Skip si le champ ipInput_ a le focus
+    // (le paste local au champ doit gagner).
+    if (e.type == sf::Event::KeyPressed
+        && e.key.code == sf::Keyboard::V
+        && (e.key.system || e.key.control)
+        && !ipInput_.hasFocus()) {
+        controller_.pasteFromClipboard();
+        return;
     }
 
     // Propager aux boutons.
