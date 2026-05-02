@@ -36,7 +36,14 @@ std::vector<FileEntry> FilesystemService::enumerate(
         }
 
         if (std::filesystem::is_directory(in, ec)) {
-            const auto base = in.filename();
+            // V1.3.1 : `path::filename()` retourne "" si le chemin se
+            // termine par un séparateur ("/Users/foo/MyFolder/" → "").
+            // Selon la source du path (picker macOS, drag&drop, glob…),
+            // un trailing slash peut apparaître → folder name perdu →
+            // fichiers déposés à plat chez le receveur. On retombe sur
+            // parent_path().filename() dans ce cas.
+            auto base = in.filename();
+            if (base.empty()) base = in.parent_path().filename();
             for (const auto& entry :
                  std::filesystem::recursive_directory_iterator(in, ec)) {
                 if (!entry.is_regular_file(ec)) continue;
