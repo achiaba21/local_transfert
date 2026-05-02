@@ -212,7 +212,7 @@
     <h1>Interface Web embarquée</h1>
     <p class="subtitle">Échange de fichiers LAN via navigateur, sans installation</p>
   </div>
-  <span class="badge ok">V1.2 livrée · 14/14 tests</span>
+  <span class="badge ok">V1.3 livrée · 14/14 tests · Audit 82</span>
 </header>
 
 <p class="meta">
@@ -683,6 +683,34 @@ Web (pill "Web" accent-light, radius pill) :
 
 <!-- ==================== 11. CHANGELOG ==================== -->
 <h2 id="changelog">11. Changelog</h2>
+
+<h3>V1.3 — 2026-05-02 <span class="badge accent">LIVRÉE</span> · Sprint Web P2P V1.3 · Robustesse + Liste UI</h3>
+<p>
+  Durcit les transferts P2P en éliminant les <strong>silent stalls</strong>
+  (DataChannel ouvert mais data ne passe pas) et donne une visibilité
+  par-fichier persistante côté émetteur ET récepteur. Tout en frontend,
+  pas de changement backend.
+</p>
+<ul>
+  <li>✅ <strong>Watchdogs explicites</strong> (4 mécaniques) : noDataWatchdog (receveur 10 s sans byte → cleanup), ackWatchdog (sender 1 s polling → silent stall détecté), connectTimer (20 s ICE), disconnectTimer (15 s flottement Wi-Fi)</li>
+  <li>✅ <strong>Intégrité par fichier</strong> : <code>cur.received !== cur.size</code> → fichier marqué failed, ne télécharge PAS (évite les fichiers tronqués téléchargés en silence)</li>
+  <li>✅ <strong>Drain final 30 s timeout</strong> côté émetteur (au lieu de boucle infinie)</li>
+  <li>✅ <strong>Disconnect transitoire géré</strong> : flottement Wi-Fi met les sends en pause, reprise auto à <code>connected</code>. Si dépasse 15 s → cleanup propre</li>
+  <li>✅ <strong>Ack receveur → émetteur</strong> toutes les 500 ms via DataChannel : émetteur affiche la VRAIE progression (bytesAckedByReceiver) au lieu de bytesSent local</li>
+  <li>✅ <strong>Composite key</strong> <code>${deviceId}:${role}</code> : permet A↔B simultané (1 entrée sender + 1 receiver pour le même peer)</li>
+  <li>✅ <strong>Multi-fichier robuste</strong> : si UN fichier échoue, on marque celui-ci ✗ et on continue sur les suivants au lieu de cleanup global</li>
+  <li>✅ <strong>TransferRegistry</strong> (nouveau module 333 LOC) : liste persistante par-fichier dans localStorage (métadonnées seulement, Blobs jamais persistés). Cap 100 entrées, drop FIFO. Boot : entries laissées en pending/sending → marquées <em>session_perdue</em></li>
+  <li>✅ <strong>Tabs Host / P2P</strong> dans la footer transfers-bar (compteurs distincts, switch instantané)</li>
+  <li>✅ <strong>Notifications complétion</strong> : toast + son (WebAudio sinusoïdal 880 Hz fade) + <code>navigator.vibrate(200)</code> mobile</li>
+  <li>✅ <strong>Retry par fichier</strong> sur ligne ✗ : relance UNIQUEMENT le fichier échoué via la même connexion. Refresh entre-temps → toast invitant à re-sélectionner</li>
+  <li>✅ <strong>14/14 tests existants passent</strong>, audit 82/100, V1.2 nominal flow inchangé</li>
+</ul>
+<p class="meta">
+  Détails : <a href="../specs/web-p2p-v1-3/business-spec.md">business-spec V1.3</a>,
+  <a href="../specs/web-p2p-v1-3/architecture.md">architecture V1.3</a>,
+  <a href="../specs/web-p2p-v1-3/ui-proposal.md">ui-proposal V1.3</a>,
+  <a href="../specs/web-p2p-v1-3/audit-report.md">audit V1.3 (82/100 ✅)</a>.
+</p>
 
 <h3>V1.2 — 2026-05-01 <span class="badge accent">LIVRÉE</span> · Sprint Web P2P</h3>
 <p>

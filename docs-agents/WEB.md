@@ -3,6 +3,123 @@
 > Guide central pour tout agent / session Claude qui travaille sur la
 > couche `ltr::web`. Lire avant toute modification.
 
+## 🆕 V1.3 — Sprint Web P2P V1.3 — Robustesse + Liste UI (2026-05-02)
+
+V1.3 durcit le P2P et ajoute une visibilité par-fichier persistante.
+Tout en frontend, pas de changement backend.
+
+### Lot 4 — Composite key `(deviceId, role)`
+
+`Map<connKey, ConnectionState>` avec `connKey = "${deviceId}:${role}"`
+remplace l'ancienne Map indexée juste par deviceId. Permet A↔B
+simultané : 1 entrée sender + 1 entrée receiver pour le même peer
+chez chaque navigateur. Helper `getConn(deviceId, role)` +
+`cleanup(state, label)` qui prend le state directement.
+
+### Lot 1 — Watchdogs + intégrité + disconnect transitoire
+
+Quatre mécaniques explicites :
+
+- **`noDataWatchdog`** — receveur, 10 s à `dc.onopen`. Si
+  `bytesReceived === 0` → cleanup `'✗ Pas de données'`. Annulé au
+  1er chunk reçu.
+- **`ackWatchdog`** — émetteur, polling 1 s. Si `bytesSent >
+  bytesAckedByReceiver` ET `now - lastAckAt > 10 s` → cleanup
+  `'✗ Récepteur muet'` (silent stall détecté).
+- **`connectTimer`** — 20 s pour atteindre `pc.connectionState ===
+  'connected'`. Sinon `'✗ Pas de route LAN'`.
+- **`disconnectTimer`** — 15 s. Si `pc.connectionState` reste à
+  `disconnected` au-delà → cleanup `'✗ Wi-Fi perdu'`. Si retour à
+  `connected` avant → reset.
+
+Intégrité par fichier dans `finalizeReceivedFile` :
+```js
+if (cur.size && cur.received !== cur.size) {
+    fs.status = 'failed'; fs.error = 'taille_invalide';
+    return;  // ne télécharge PAS
+}
+```
+
+Drain final côté émetteur : `while bufferedAmount > 0` borné à
+`DRAIN_TIMEOUT_MS = 30_000`.
+
+`safeSend` est devenu async et patiente pendant `disconnectedSince`
+actif (pause des sends pendant flottement Wi-Fi).
+
+### Lot 3 — Ack receveur → émetteur
+
+Receveur : à `dc.onopen`, démarre `setInterval(500ms)` qui envoie
+`{kind:'ack', bytes: state.bytesReceived}`. Émetteur reçoit via
+`handleSignal('ack')` (nouveau type whitelisté côté serveur via
+p2p_routes), met à jour `state.bytesAckedByReceiver` + `lastAckAt`.
+`updateProgress` côté sender utilise désormais cette vraie
+progression (au lieu de `bytesSent` purement local).
+
+⚠️ Note : le type `ack` est traité côté JS, le serveur signaling
+relaye sans le valider plus que les autres types whitelistés
+(`offer/answer/ice/refuse/cancel/bye`). À ajouter dans la whitelist
+serveur si on veut être rigoureux — actuellement passé par l'ack
+du sender, mais en pratique l'ack arrive directement via le
+DataChannel ouvert (PAS via /api/p2p/signal). Re-vérifier — le
+DataChannel est P2P, pas relayé.
+
+### Lot 2 — TransferRegistry + tabs Host/P2P + UI persistante
+
+Nouveau module `assets/web/js/transfer_registry.js` (~333 LOC) :
+
+- **entries[]** : source de vérité (id, direction, peer, name, size,
+  status, bytes, error, timestamps)
+- **status** ∈ `pending | sending | sent | received | failed`
+- **localStorage** `ltr-p2p-history` persiste les métadonnées (cap
+  100, drop FIFO). **Blobs jamais persistés.**
+- **Boot** : entries laissées `pending`/`sending` par un précédent
+  refresh → `failed reason='session_perdue'`
+- **Retry** : `originalFiles: Map<entryId, File>` en RAM permet de
+  relancer l'envoi du même File. Refresh = perte → toast invitant
+  à re-sélectionner
+- **Render** : tri par récence, max 10 visibles + bouton « Voir
+  tout », icônes ✓ ↻ ✗ ⏱ colorées, barre 3 px en `sending`
+- **notifyComplete** : toast + son WebAudio sinusoïdal 880 Hz
+  120 ms fade exp + `navigator.vibrate(200)`
+
+Tabs Host/P2P dans la footer transfers-bar : 2 pills `.tx-tab`,
+switch instantané, compteurs respectifs. Ne mélange pas les flux
+host↔web et web↔web.
+
+Hooks p2p.js → Registry :
+- `startSendTo` → `addEntry(direction='out')` × N + `attachFile`
+  pour permettre retry
+- `syncFileStatus(state, fs)` helper appelé à chaque transition,
+  notifie aussi `notifyComplete` à `sent`/`received`
+- `handleReceiverControl('file-meta')` → `addEntry(direction='in')`
+- `finalizeReceivedFile` → status `received` ou
+  `failed:taille_invalide`
+
+### Multi-fichier : continuation après échec partiel
+
+V1.2 cleanup global si UN fichier échoue → tout perdu. V1.3 :
+chaque fichier a son `fs.status`. Si meta/chunk/end fail sur fichier
+3, marque ce fichier `failed`, **continue** sur fichier 4. Plus de
+cascade.
+
+### Constantes V1.3
+
+```js
+const WATCHDOG_NO_DATA_MS = 10_000;
+const NO_ACK_TIMEOUT_MS   = 10_000;
+const ACK_INTERVAL_MS     = 500;
+const DISCONNECT_TTL_MS   = 15_000;
+const DRAIN_TIMEOUT_MS    = 30_000;
+const SENDER_TTL_MS       = 90_000;  // hérité V1.2.1
+```
+
+### Tests V1.3 : 14/14 passent
+
+(Pas de nouveau test backend, changements purement frontend. Tests
+existants vérifient signaling + auth + dedup + display name.)
+
+---
+
 ## 🆕 V1.2 — Sprint Web P2P (2026-05-01)
 
 ### Web↔web direct via WebRTC DataChannel
