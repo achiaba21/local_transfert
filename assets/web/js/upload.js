@@ -6,10 +6,19 @@
 (function () {
   'use strict';
   const {
-    clientLog, goToLogin, escapeHtml, iconFor,
+    clientLog, goToLogin, escapeHtml, iconFor, formatBytes,
     supportsFolderPick
   } = window.LTR;
   const $ = (s) => document.querySelector(s);
+
+  // V1.4.3 — staging : chaque fichier ajouté (drop / picker / paste)
+  // attend un choix de destination (Host ou peer P2P) avant envoi.
+  // Map<stagingId, { file, li, sent }>
+  const staging = new Map();
+  function stagingId() {
+    return 'st-' + Date.now().toString(36)
+         + '-' + Math.random().toString(36).slice(2, 6);
+  }
 
   function init() {
     setupDropZone();
@@ -80,12 +89,11 @@
         return;
       }
       ev.preventDefault();
-      uploadFiles(fakeFiles).then(() => {
-        pasteToast(fakeFiles.length === 1
-          ? `${fakeFiles[0].name} envoyé`
-          : `${fakeFiles.length} éléments envoyés`,
-          'success');
-      });
+      stageFiles(fakeFiles);
+      pasteToast(fakeFiles.length === 1
+        ? `${fakeFiles[0].name} ajouté · choisis la destination`
+        : `${fakeFiles.length} éléments ajoutés · choisis la destination`,
+        'info');
     });
   }
 
@@ -167,11 +175,11 @@
         pasteToast('Presse-papier vide ou format non supporté', 'warning');
         return;
       }
-      await uploadFiles(fakeFiles);
+      stageFiles(fakeFiles);
       pasteToast(fakeFiles.length === 1
-        ? `${fakeFiles[0].name} envoyé`
-        : `${fakeFiles.length} éléments envoyés`,
-        'success');
+        ? `${fakeFiles[0].name} ajouté · choisis la destination`
+        : `${fakeFiles.length} éléments ajoutés · choisis la destination`,
+        'info');
     } catch (e) {
       const msg = (e && e.message) || String(e);
       console.error('[paste] failed:', e);
@@ -237,7 +245,7 @@
       }));
     dz.addEventListener('drop', (e) => {
       if (e.dataTransfer && e.dataTransfer.files) {
-        uploadFiles(e.dataTransfer.files);
+        stageFiles(e.dataTransfer.files);
       }
     });
   }
@@ -246,7 +254,7 @@
     const fi = document.querySelector(selector);
     if (!fi) return;
     fi.addEventListener('change', () => {
-      uploadFiles(fi.files);
+      stageFiles(fi.files);
       fi.value = '';
     });
   }
@@ -262,35 +270,106 @@
     }
   }
 
-  async function uploadFiles(fileList) {
+  // V1.4.3 — staging : on AJOUTE chaque fichier dans #upload-list avec
+  // un menu « Envoyer à ▾ ». Pas d'envoi avant choix utilisateur.
+  function stageFiles(fileList) {
     const files = Array.from(fileList || []);
     if (files.length === 0) return;
-
-    // Ligne "en attente" immédiate.
-    const rows = files.map((f) => {
-      const rel = f.webkitRelativePath || f.name;
-      const li = document.createElement('li');
-      li.className = 'upload-row';
-      li.innerHTML = `
-        <span class="f-icon">${iconFor(f.name)}</span>
-        <span class="f-name">${escapeHtml(rel)}</span>
-        <span class="f-size" data-role="progress">en attente…</span>`;
+    for (const f of files) {
+      const id = stagingId();
+      const li = renderStagingRow(id, f);
       document.getElementById('upload-list').appendChild(li);
-      return li;
+      staging.set(id, { file: f, li, sent: false });
+    }
+  }
+
+  function renderStagingRow(id, file) {
+    const rel = file.webkitRelativePath || file.name;
+    const li = document.createElement('li');
+    li.className = 'upload-row staging-row';
+    li.dataset.stagingId = id;
+    li.innerHTML = `
+      <span class="f-icon">${iconFor(file.name)}</span>
+      <span class="f-name">${escapeHtml(rel)}</span>
+      <span class="f-size" data-role="progress">${formatBytes(file.size)}</span>
+      <button type="button" class="btn btn-secondary send-to-btn">Envoyer \xC3\xA0 \u25BE</button>
+      <button type="button" class="btn-ghost remove-btn" aria-label="Retirer" title="Retirer">\u2715</button>
+      <div class="send-menu" hidden role="menu"></div>`;
+    li.querySelector('.send-to-btn').addEventListener('click', () =>
+      toggleSendMenu(id));
+    li.querySelector('.remove-btn').addEventListener('click', () =>
+      removeStaging(id));
+    return li;
+  }
+
+  function removeStaging(id) {
+    const e = staging.get(id);
+    if (!e) return;
+    if (e.li && e.li.parentNode) e.li.parentNode.removeChild(e.li);
+    staging.delete(id);
+  }
+
+  function toggleSendMenu(id) {
+    const e = staging.get(id);
+    if (!e) return;
+    const menu = e.li.querySelector('.send-menu');
+    if (!menu.hidden) { menu.hidden = true; return; }
+    // Ferme tous les autres menus ouverts.
+    document.querySelectorAll('.send-menu').forEach((m) => {
+      if (m !== menu) m.hidden = true;
     });
+    // Construit la liste : Host + chaque peer P2P connecté.
+    const peers = (window.LTR.peers && window.LTR.peers.getAll
+                   && window.LTR.peers.getAll()) || [];
+    let html = '<button type="button" class="dest-btn" data-dest="host">'
+             + '\xF0\x9F\x96\xA5\xEF\xB8\x8F  Host</button>';
+    for (const p of peers) {
+      const safe = escapeHtml(p.displayName);
+      html += `<button type="button" class="dest-btn" data-dest="${escapeHtml(p.deviceId)}">`
+            + `${escapeHtml(p.emoji)}  ${safe}</button>`;
+    }
+    if (peers.length === 0) {
+      html += '<div class="dest-empty">Aucun appareil P2P connecté</div>';
+    }
+    menu.innerHTML = html;
+    menu.hidden = false;
+    menu.querySelectorAll('.dest-btn').forEach((b) => {
+      b.addEventListener('click', () => {
+        menu.hidden = true;
+        dispatchToDestination(id, b.dataset.dest);
+      });
+    });
+  }
 
-    clientLog('info',
-      '[upload] announce ' + files.length + ' fichier(s)');
+  function dispatchToDestination(id, dest) {
+    const e = staging.get(id);
+    if (!e || e.sent) return;
+    if (dest === 'host') {
+      e.sent = true;
+      sendToHost(e);
+    } else {
+      e.sent = true;
+      sendToPeer(e, dest);
+    }
+  }
 
-    // V1.1.7 : inclut relativePath pour chaque fichier (dossier préservé).
+  // Envoi vers Host : announce + upload (logique conservée de V1.1.7).
+  async function sendToHost(entry) {
+    const file = entry.file;
+    const li   = entry.li;
+    const progressEl = li.querySelector('[data-role="progress"]');
+    li.querySelector('.send-to-btn').remove();
+    li.querySelector('.remove-btn').remove();
+    progressEl.textContent = 'en attente…';
+
+    clientLog('info', '[upload] announce host: ' + file.name);
     const announcePayload = {
-      files: files.map((f) => ({
-        name:         f.name,
-        size:         f.size,
-        relativePath: f.webkitRelativePath || '',
-      })),
+      files: [{
+        name:         file.name,
+        size:         file.size,
+        relativePath: file.webkitRelativePath || '',
+      }],
     };
-
     let resp;
     try {
       resp = await fetch('/api/upload-announce', {
@@ -300,29 +379,43 @@
         body: JSON.stringify(announcePayload),
       });
     } catch (e) {
-      rows.forEach((li) =>
-        li.querySelector('[data-role="progress"]').textContent = '✗ erreur réseau');
+      progressEl.textContent = '✗ erreur réseau';
       return;
     }
-
     if (resp.status === 401) { goToLogin(); return; }
-
     let body = null;
     try { body = await resp.json(); } catch (e) {}
-
     if (!body || !body.accepted) {
       const reason = (body && body.reason) || 'refusé';
-      rows.forEach((li) =>
-        li.querySelector('[data-role="progress"]').textContent =
-          reason === 'timeout' ? '✗ pas de réponse' : '✗ refusé');
-      setTimeout(() => rows.forEach((li) => li.remove()), 6000);
+      progressEl.textContent = reason === 'timeout' ? '✗ pas de réponse' : '✗ refusé';
+      setTimeout(() => removeStaging(entry.li.dataset.stagingId), 6000);
       return;
     }
+    await uploadOne(file, li, body.uploadId);
+  }
 
-    const uploadId = body.uploadId;
-    for (let i = 0; i < files.length; i++) {
-      await uploadOne(files[i], rows[i], uploadId);
+  // Envoi vers un peer P2P via WebRTC DataChannel.
+  function sendToPeer(entry, peerDeviceId) {
+    const peer = window.LTR.peers && window.LTR.peers.getPeer(peerDeviceId);
+    if (!peer) {
+      const progressEl = entry.li.querySelector('[data-role="progress"]');
+      progressEl.textContent = '✗ pair indisponible';
+      return;
     }
+    if (!(window.LTR.p2p && window.LTR.p2p.startSendTo)) {
+      const progressEl = entry.li.querySelector('[data-role="progress"]');
+      progressEl.textContent = '✗ P2P indisponible';
+      return;
+    }
+    // Marque la ligne comme « envoyée vers P2P » et la retire après un
+    // court délai. Le suivi détaillé est géré par TransferRegistry V1.3
+    // (zone TRANSFERTS · P2P).
+    entry.li.querySelector('.send-to-btn').remove();
+    entry.li.querySelector('.remove-btn').remove();
+    const progressEl = entry.li.querySelector('[data-role="progress"]');
+    progressEl.textContent = '→ ' + (peer.emoji || '') + ' ' + peer.displayName;
+    window.LTR.p2p.startSendTo(peer, [entry.file]);
+    setTimeout(() => removeStaging(entry.li.dataset.stagingId), 4000);
   }
 
   function uploadOne(file, li, uploadId) {

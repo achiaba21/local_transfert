@@ -109,10 +109,15 @@
     return peers.find((p) => p.deviceId === deviceId) || null;
   }
 
+  // V1.4.3 : exposé pour upload.js (menu destination du staging).
+  function getAll() {
+    return peers.slice();
+  }
+
   // V1.2 — Pour la modale réception : permet à p2p.js de déclencher un
   // override du handler (utilisé pour démontrer la présence d'un peer).
   function onPeerClicked(cb) { onPeerClickedCb = cb; }
 
   window.LTR = window.LTR || {};
-  window.LTR.peers = { init, setPeers, getPeer, onPeerClicked };
+  window.LTR.peers = { init, setPeers, getPeer, getAll, onPeerClicked };
 })();
