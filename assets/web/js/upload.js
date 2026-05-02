@@ -17,58 +17,120 @@
     setupFileInputChange('#folder-input');
     setupFolderButtonVisibility();
     setupPasteButton();
+    setupPasteEvent();
   }
 
-  // V1.4 — Sprint Clipboard Paste : bouton « Coller » côté web.
-  //
-  // Le bouton est visible dès que `navigator.clipboard` existe (texte
-  // au minimum). On tente `read()` (texte + image) si dispo, sinon
-  // fallback sur `readText()` (plus largement supporté).
-  //
-  // ⚠ Limites browser :
-  //   - `read()` et `readText()` exigent un secure context (HTTPS ou
-  //     localhost). Sur http://192.168.x.x:45456, la plupart des
-  //     navigateurs refusent. On capture l'erreur et affiche un
-  //     toast clair plutôt que de cacher le bouton silencieusement.
-  //   - Aucun navigateur ne donne accès aux fichiers via
-  //     navigator.clipboard (use drag-drop ou file picker).
+  // V1.4.2 — Stratégie en 2 couches pour le presse-papier web :
+  //   1. document `paste` event natif : capture Cmd+V utilisateur,
+  //      marche sur HTTP non-localhost, pas de permission requise.
+  //   2. bouton « Coller » : si navigator.clipboard.read est dispo
+  //      (HTTPS / localhost) → paste direct ; sinon → toast invitant
+  //      à utiliser Cmd+V (qui passera par la couche 1).
   function setupPasteButton() {
     const btn = document.getElementById('paste-btn');
     console.log('[paste] setupPasteButton btn=', btn);
     if (!btn) return;
-    const hasClipboard = !!(navigator.clipboard
+    const hasRead = !!(navigator.clipboard
       && (navigator.clipboard.read || navigator.clipboard.readText));
-    console.log('[paste] hasClipboard=', hasClipboard,
+    console.log('[paste] capabilities',
       ' isSecureContext=', window.isSecureContext,
       ' read=', !!(navigator.clipboard && navigator.clipboard.read),
       ' readText=', !!(navigator.clipboard && navigator.clipboard.readText));
-    // V1.4.1 : on AFFICHE le bouton dans tous les cas (sauf si l'API
-    // clipboard est totalement absente — auquel cas le bouton serait
-    // sans utilité). Si secureCtx ou perm manquent, on le saura au
-    // moment du clic via le toast diagnostic.
-    if (!hasClipboard) {
-      console.warn('[paste] navigator.clipboard absent — bouton masqué');
-      btn.hidden = true;
-      return;
-    }
+    // Bouton TOUJOURS visible — on a la couche `paste` event en
+    // fallback même si navigator.clipboard.read est absent.
     btn.hidden = false;
     btn.addEventListener('click', (ev) => {
-      console.log('[paste] click handler');
+      console.log('[paste] click');
       ev.preventDefault();
-      handlePaste(btn);
+      if (hasRead) {
+        handlePaste(btn);
+      } else {
+        const k = (navigator.platform || '').toLowerCase().includes('mac')
+          ? '⌘V' : 'Ctrl+V';
+        pasteToast('Appuie sur ' + k + ' pour coller', 'info');
+      }
     });
-    // V1.4.1 : raccourci Cmd+V (Mac) / Ctrl+V (Win) global côté web.
-    // Skip si le focus est dans un input/textarea (paste local au champ).
-    document.addEventListener('keydown', (ev) => {
-      if (ev.key !== 'v' && ev.key !== 'V') return;
-      if (!(ev.metaKey || ev.ctrlKey)) return;
+  }
+
+  // V1.4.2 — Listener global `paste`. Le browser émet cet événement
+  // quand l'utilisateur fait Cmd+V/Ctrl+V dans la page (hors d'un
+  // champ texte qui consomme l'événement). Ne nécessite ni permission
+  // ni secure context. Marche sur HTTP LAN.
+  function setupPasteEvent() {
+    document.addEventListener('paste', (ev) => {
       const t = ev.target;
       const tag = t && t.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      console.log('[paste] keyboard shortcut');
+      // Si focus dans un INPUT/TEXTAREA, on laisse le paste local au
+      // champ (ne pas voler le contenu pour upload).
+      if (tag === 'INPUT' || tag === 'TEXTAREA' ||
+          (t && t.isContentEditable)) {
+        console.log('[paste] event skipped — input focus');
+        return;
+      }
+      const data = ev.clipboardData;
+      console.log('[paste] event types=',
+        data ? Array.from(data.types) : '(no clipboardData)',
+        ' files=', data ? data.files.length : 0);
+      if (!data) return;
+
+      const fakeFiles = extractFromClipboardData(data);
+      console.log('[paste] event extracted n=', fakeFiles.length);
+      if (fakeFiles.length === 0) {
+        pasteToast('Presse-papier vide ou format non supporté', 'warning');
+        return;
+      }
       ev.preventDefault();
-      handlePaste(btn);
+      uploadFiles(fakeFiles).then(() => {
+        pasteToast(fakeFiles.length === 1
+          ? `${fakeFiles[0].name} envoyé`
+          : `${fakeFiles.length} éléments envoyés`,
+          'success');
+      });
     });
+  }
+
+  // Extrait des File objects depuis ClipboardEvent.clipboardData.
+  // Priorité : Files (drag/Cmd+C Finder Chrome desktop), Items (image
+  // inline), text/plain.
+  function extractFromClipboardData(data) {
+    const out = [];
+    // 1. Files (Chrome desktop expose les fichiers copiés dans le
+    // Finder ici).
+    if (data.files && data.files.length > 0) {
+      for (const f of data.files) out.push(f);
+      return out;
+    }
+    // 2. Items binaires (image inline).
+    if (data.items) {
+      for (const it of data.items) {
+        if (it.kind === 'file') {
+          const f = it.getAsFile();
+          if (f) {
+            // Si le fichier n'a pas de nom (image inline), on en
+            // génère un avec timestamp.
+            if (!f.name || f.name === 'image.png' || f.name === '') {
+              const ext = (it.type === 'image/png') ? 'png'
+                : (it.type === 'image/jpeg') ? 'jpg' : 'bin';
+              const renamed = new File([f],
+                'clipboard-' + timestampSuffix() + '.' + ext,
+                { type: it.type });
+              out.push(renamed);
+            } else {
+              out.push(f);
+            }
+          }
+        }
+      }
+      if (out.length > 0) return out;
+    }
+    // 3. Text fallback.
+    const text = data.getData ? data.getData('text/plain') : '';
+    if (text) {
+      out.push(new File([text],
+        'clipboard-' + timestampSuffix() + '.txt',
+        { type: 'text/plain' }));
+    }
+    return out;
   }
 
   function pasteToast(text, kind) {
