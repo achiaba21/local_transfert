@@ -34,15 +34,41 @@
   //     navigator.clipboard (use drag-drop ou file picker).
   function setupPasteButton() {
     const btn = document.getElementById('paste-btn');
+    console.log('[paste] setupPasteButton btn=', btn);
     if (!btn) return;
     const hasClipboard = !!(navigator.clipboard
       && (navigator.clipboard.read || navigator.clipboard.readText));
+    console.log('[paste] hasClipboard=', hasClipboard,
+      ' isSecureContext=', window.isSecureContext,
+      ' read=', !!(navigator.clipboard && navigator.clipboard.read),
+      ' readText=', !!(navigator.clipboard && navigator.clipboard.readText));
+    // V1.4.1 : on AFFICHE le bouton dans tous les cas (sauf si l'API
+    // clipboard est totalement absente — auquel cas le bouton serait
+    // sans utilité). Si secureCtx ou perm manquent, on le saura au
+    // moment du clic via le toast diagnostic.
     if (!hasClipboard) {
+      console.warn('[paste] navigator.clipboard absent — bouton masqué');
       btn.hidden = true;
       return;
     }
     btn.hidden = false;
-    btn.addEventListener('click', () => handlePaste(btn));
+    btn.addEventListener('click', (ev) => {
+      console.log('[paste] click handler');
+      ev.preventDefault();
+      handlePaste(btn);
+    });
+    // V1.4.1 : raccourci Cmd+V (Mac) / Ctrl+V (Win) global côté web.
+    // Skip si le focus est dans un input/textarea (paste local au champ).
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'v' && ev.key !== 'V') return;
+      if (!(ev.metaKey || ev.ctrlKey)) return;
+      const t = ev.target;
+      const tag = t && t.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      console.log('[paste] keyboard shortcut');
+      ev.preventDefault();
+      handlePaste(btn);
+    });
   }
 
   function pasteToast(text, kind) {
@@ -64,12 +90,17 @@
 
   async function handlePaste(btn) {
     if (btn) btn.disabled = true;
+    console.log('[paste] handlePaste start',
+      ' secureCtx=', window.isSecureContext,
+      ' read=', !!(navigator.clipboard && navigator.clipboard.read),
+      ' readText=', !!(navigator.clipboard && navigator.clipboard.readText));
     clientLog('info', '[paste] click — secureCtx='
       + (window.isSecureContext ? '1' : '0')
       + ' read=' + !!(navigator.clipboard && navigator.clipboard.read)
       + ' readText=' + !!(navigator.clipboard && navigator.clipboard.readText));
     try {
       const fakeFiles = await readClipboardItems();
+      console.log('[paste] got fakeFiles n=', fakeFiles.length);
       if (fakeFiles.length === 0) {
         pasteToast('Presse-papier vide ou format non supporté', 'warning');
         return;
@@ -81,8 +112,8 @@
         'success');
     } catch (e) {
       const msg = (e && e.message) || String(e);
+      console.error('[paste] failed:', e);
       clientLog('warn', '[paste] failed: ' + msg);
-      // Diagnostic explicite des erreurs courantes.
       if (!window.isSecureContext) {
         pasteToast('Le presse-papier nécessite HTTPS ou localhost (page actuelle = HTTP)', 'warning');
       } else if (/denied|not allowed|notallowed/i.test(msg)) {
@@ -95,12 +126,14 @@
     }
   }
 
-  // Tente read() (texte + image) puis fallback readText() pour le texte.
   async function readClipboardItems() {
     const fakeFiles = [];
     if (navigator.clipboard.read) {
+      console.log('[paste] tente clipboard.read()');
       const items = await navigator.clipboard.read();
+      console.log('[paste] got items n=', items.length);
       for (const it of items) {
+        console.log('[paste] item types=', it.types);
         if (it.types && it.types.includes('image/png')) {
           const blob = await it.getType('image/png');
           fakeFiles.push(new File([blob],
@@ -118,8 +151,9 @@
       }
       return fakeFiles;
     }
-    // Fallback texte seul.
+    console.log('[paste] fallback readText()');
     const text = await navigator.clipboard.readText();
+    console.log('[paste] readText len=', text ? text.length : 0);
     if (text) {
       fakeFiles.push(new File([text],
         'clipboard-' + timestampSuffix() + '.txt',
