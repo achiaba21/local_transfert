@@ -587,6 +587,28 @@ body.page-main {
 /* État pendant un transfert P2P actif : barre de progression. */
 .peer-card--sending {
   border-color: var(--accent);
+  position: relative;
+}
+.peer-cancel-btn {
+  position: absolute;
+  top: 4px; right: 4px;
+  width: 20px; height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: var(--surface);
+  color: var(--text-secondary);
+  border: 1px solid var(--separator);
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+.peer-cancel-btn:hover {
+  background: var(--error);
+  color: #fff;
+  border-color: var(--error);
 }
 .peer-progress-bar {
   width: 100%;

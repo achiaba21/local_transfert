@@ -24,10 +24,15 @@
   // Configuration WebRTC — LAN-only V1.
   const RTC_CONFIG = { iceServers: [] };
 
-  const CHUNK_SIZE   = 64 * 1024;            // 64 KB
+  // V1.2.1 : 16 KB (au lieu de 64 KB) pour compat Safari. Safari ne
+  // négocie pas toujours `a=max-message-size` dans le SDP, donc le SCTP
+  // retombe au défaut RFC 8831 = 16 384 octets. Au-delà, Safari drop
+  // silencieusement → le receveur ne voit rien arriver.
+  const CHUNK_SIZE   = 16 * 1024;            // 16 KB
   const BUFFER_HIGH  = 1 * 1024 * 1024;      // 1 MB seuil backpressure
   const BUFFER_LOW   = 256 * 1024;           // attendre que ça redescende
   const ACCEPT_TTL_MS = 60_000;              // 60s pour accepter
+  const SENDER_TTL_MS = 90_000;              // 90s : abandon si pas connecté
 
   // Map<deviceId, ConnectionState>
   const conns = new Map();
@@ -54,10 +59,22 @@
       totalBytes: files.reduce((a, f) => a + f.size, 0),
       startedAt: 0,
       uiCard: null,
+      phase: 'waiting',
     };
     conns.set(deviceId, state);
-    state.uiCard = markCardSending(deviceId, 0);
+    state.uiCard = markCardSending(deviceId, 'waiting');
     showSticky();
+    // TTL côté émetteur : si pas connecté en 90s, on abandonne
+    // proprement (le receveur n'a peut-être jamais cliqué Accepter
+    // ou a fermé son onglet).
+    state.senderTtl = setTimeout(() => {
+      if (state.phase !== 'sending') {
+        clientLog('warn', '[p2p] sender TTL — pas de réponse');
+        toast(`${peer.displayName} n'a pas répondu`, 'warning');
+        postSignal(deviceId, 'cancel', { reason: 'sender-ttl' });
+        cleanup(deviceId, 'Pas de réponse');
+      }
+    }, SENDER_TTL_MS);
 
     try {
       const pc = new RTCPeerConnection(RTC_CONFIG);
@@ -204,8 +221,16 @@
       }
     };
     pc.oniceconnectionstatechange = () => {
-      clientLog('info', '[p2p] ice=' + pc.iceConnectionState
+      const ics = pc.iceConnectionState;
+      clientLog('info', '[p2p] ice=' + ics
                        + ' for ' + state.peer.deviceId.substring(0, 8));
+      // Transition phase côté émetteur : waiting (offer envoyée) →
+      // connecting (ICE en cours) → sending (DataChannel ouvert).
+      if (state.role === 'sender' && state.phase === 'waiting'
+          && (ics === 'checking' || ics === 'connected')) {
+        state.phase = 'connecting';
+        if (state.uiCard) setCardPhase(state.uiCard, 'connecting');
+      }
     };
     pc.onconnectionstatechange = () => {
       const cs = pc.connectionState;
@@ -234,7 +259,11 @@
   // ====================================================================
   function wireSenderDc(dc, state) {
     dc.bufferedAmountLowThreshold = BUFFER_LOW;
-    dc.onopen  = () => sendNextFile(state);
+    dc.onopen  = () => {
+      state.phase = 'sending';
+      if (state.uiCard) setCardPhase(state.uiCard, 'sending');
+      sendNextFile(state);
+    };
     dc.onerror = (e) => {
       // Si tout a été envoyé avant l'erreur, c'est probablement le
       // receveur qui a fermé sa pc → on traite comme succès, pas erreur.
@@ -415,11 +444,32 @@
       if (res.status === 401) {
         if (window.LTR.goToLogin) window.LTR.goToLogin();
       } else if (res.status === 404) {
+        // Le destinataire n'est plus connecté (logout, onglet fermé,
+        // session expirée). On notifie l'utilisateur côté émetteur
+        // au lieu de rester bloqué silencieusement.
         clientLog('warn', '[p2p] target offline ' + toDeviceId.substring(0, 8));
+        const state = conns.get(toDeviceId);
+        if (state && state.role === 'sender'
+            && state.phase !== 'sending') {
+          const name = state.peer ? state.peer.displayName : 'Le destinataire';
+          toast(`${name} n'est plus connecté`, 'warning');
+          cleanup(toDeviceId, 'Hors-ligne');
+        }
       }
     } catch (e) {
       clientLog('error', '[p2p] signal POST failed: ' + (e && e.message));
     }
+  }
+
+  // Annulation côté émetteur déclenchée par le bouton ✕ de la card.
+  // Émet un signal cancel vers le receveur (qui ferme sa modale ou
+  // sa connexion) et nettoie l'état local.
+  function cancelOutgoing(deviceId) {
+    const state = conns.get(deviceId);
+    if (!state || state.role !== 'sender') return;
+    clientLog('info', '[p2p] sender cancel ' + deviceId.substring(0, 8));
+    postSignal(deviceId, 'cancel', { reason: 'user' });
+    cleanup(deviceId, 'Annulé');
   }
 
   // ====================================================================
@@ -483,13 +533,12 @@
   // ====================================================================
   // UI : marquage card peer + sticky bar bas
   // ====================================================================
-  function markCardSending(deviceId) {
+  function markCardSending(deviceId, phase = 'waiting') {
     const card = document.querySelector(
       `.peer-card[data-device-id="${cssEscape(deviceId)}"]`);
     if (!card) return null;
     card.classList.add('peer-card--sending');
-    const sub = card.querySelector('.peer-sub');
-    if (sub) sub.textContent = '0 % · …';
+    setCardPhase(card, phase);
     let bar = card.querySelector('.peer-progress-bar');
     if (!bar) {
       bar = document.createElement('div');
@@ -498,7 +547,29 @@
       card.appendChild(bar);
     }
     bar.firstElementChild.style.width = '0%';
+    // Bouton ✕ pour annuler. Une seule fois — le handler est posé ici.
+    if (!card.querySelector('.peer-cancel-btn')) {
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'peer-cancel-btn';
+      x.textContent = '✕';
+      x.setAttribute('aria-label', 'Annuler le transfert');
+      x.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        cancelOutgoing(deviceId);
+      });
+      card.appendChild(x);
+    }
     return card;
+  }
+
+  // Met à jour le sous-label de la card selon la phase courante.
+  function setCardPhase(card, phase) {
+    const sub = card.querySelector('.peer-sub');
+    if (!sub) return;
+    if (phase === 'waiting')         sub.textContent = 'En attente de réponse…';
+    else if (phase === 'connecting') sub.textContent = 'Connexion…';
+    else if (phase === 'sending')    sub.textContent = '0 % · …';
   }
 
   function updateProgress(state) {
@@ -560,6 +631,11 @@
     }
     if (state.ttlTimer) clearTimeout(state.ttlTimer);
     if (state.connectTimer) clearTimeout(state.connectTimer);
+    if (state.senderTtl) clearTimeout(state.senderTtl);
+    if (state.uiCard) {
+      const x = state.uiCard.querySelector('.peer-cancel-btn');
+      if (x) x.remove();
+    }
     conns.delete(deviceId);
     refreshSticky();
   }
