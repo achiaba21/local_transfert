@@ -33,9 +33,19 @@
   const BUFFER_LOW   = 256 * 1024;           // attendre que ça redescende
   const ACCEPT_TTL_MS = 60_000;              // 60s pour accepter
   const SENDER_TTL_MS = 90_000;              // 90s : abandon si pas connecté
+  // V1.3 — Robustesse
+  const WATCHDOG_NO_DATA_MS = 10_000;        // dc open sans 0 byte → ✗
+  const NO_ACK_TIMEOUT_MS   = 10_000;        // sender push sans ack → ✗
+  const ACK_INTERVAL_MS     = 500;           // receveur émet ack
+  const DISCONNECT_TTL_MS   = 15_000;        // pc disconnected dure trop
+  const DRAIN_TIMEOUT_MS    = 30_000;        // drain final côté sender
 
-  // Map<deviceId, ConnectionState>
+  // Map<connKey, ConnectionState> où connKey = `${deviceId}:${role}`.
+  // V1.3 — Lot 4 : permet A↔B simultané (1 entrée sender + 1 entrée
+  // receiver pour le même peer chez chaque navigateur).
   const conns = new Map();
+  function connKey(deviceId, role) { return deviceId + ':' + role; }
+  function getConn(deviceId, role) { return conns.get(connKey(deviceId, role)); }
 
   // ====================================================================
   // OUTGOING — démarrage d'un envoi A → B
@@ -43,8 +53,9 @@
   async function startSendTo(peer, files) {
     const { deviceId } = peer;
     if (!files || files.length === 0) return;
-    if (conns.has(deviceId)) {
-      clientLog('warn', '[p2p] connexion déjà en cours vers ' + deviceId);
+    if (conns.has(connKey(deviceId, 'sender'))) {
+      clientLog('warn', '[p2p] envoi déjà en cours vers ' + deviceId);
+      toast(`Envoi déjà en cours vers ${peer.displayName}`, 'warning');
       return;
     }
 
@@ -56,23 +67,28 @@
       dc: null,
       currentFileIdx: 0,
       bytesSent: 0,
+      bytesAckedByReceiver: 0,    // V1.3 — Lot 3 : vraie progression
+      lastAckAt: Date.now(),
       totalBytes: files.reduce((a, f) => a + f.size, 0),
       startedAt: 0,
       uiCard: null,
       phase: 'waiting',
+      // V1.3 — Lot 2 : statut par fichier (pour la liste UI persistante)
+      fileStatuses: files.map((f, i) => ({
+        idx: i, name: f.name, size: f.size,
+        status: 'pending', bytes: 0, error: null,
+      })),
     };
-    conns.set(deviceId, state);
+    conns.set(connKey(deviceId, 'sender'), state);
     state.uiCard = markCardSending(deviceId, 'waiting');
     showSticky();
-    // TTL côté émetteur : si pas connecté en 90s, on abandonne
-    // proprement (le receveur n'a peut-être jamais cliqué Accepter
-    // ou a fermé son onglet).
+    // TTL côté émetteur : si pas connecté en 90s, on abandonne.
     state.senderTtl = setTimeout(() => {
       if (state.phase !== 'sending') {
         clientLog('warn', '[p2p] sender TTL — pas de réponse');
         toast(`${peer.displayName} n'a pas répondu`, 'warning');
         postSignal(deviceId, 'cancel', { reason: 'sender-ttl' });
-        cleanup(deviceId, 'Pas de réponse');
+        cleanup(state, 'Pas de réponse');
       }
     }, SENDER_TTL_MS);
 
@@ -92,7 +108,7 @@
       clientLog('info', '[p2p] offer sent to ' + deviceId.substring(0, 8));
     } catch (e) {
       clientLog('error', '[p2p] startSendTo failed: ' + (e && e.message));
-      cleanup(deviceId, '✗ Erreur P2P');
+      cleanup(state, '✗ Erreur P2P');
     }
   }
 
@@ -103,6 +119,7 @@
     const { from, type, payload } = msg;
     if (!from) return;
 
+    // L'offer crée toujours un nouveau state receiver chez nous.
     if (type === 'offer') {
       const peer = window.LTR.peers && window.LTR.peers.getPeer(from);
       if (!peer) {
@@ -113,10 +130,23 @@
       return;
     }
 
-    const state = conns.get(from);
+    // V1.3 — Lot 4 : routage par rôle.
+    //  - answer / ice (réponse à mon offer)  → state sender chez moi
+    //  - ack (feedback de mes envois)         → state sender
+    //  - refuse (ma demande refusée)          → state sender
+    //  - cancel / bye : ambigu, on essaie les 2 rôles
+    let state = null;
+    if (type === 'answer' || type === 'ack' || type === 'refuse') {
+      state = getConn(from, 'sender');
+    } else if (type === 'cancel' || type === 'bye') {
+      state = getConn(from, 'sender') || getConn(from, 'receiver');
+    } else if (type === 'ice') {
+      // ICE peut venir des deux sens : on essaie le rôle qui a une pc.
+      state = getConn(from, 'receiver') || getConn(from, 'sender');
+    }
     if (!state) {
       clientLog('warn', '[p2p] signal type=' + type
-                       + ' but no connection for ' + from.substring(0, 8));
+                       + ' no state for ' + from.substring(0, 8));
       return;
     }
 
@@ -125,10 +155,6 @@
         await state.pc.setRemoteDescription(payload.sdp);
       } catch (e) { clientLog('error', '[p2p] setRemote(answer): ' + e); }
     } else if (type === 'ice') {
-      // Si la pc n'est pas encore créée (receveur qui n'a pas encore
-      // cliqué Accepter), file les candidates pour les drainer plus tard.
-      // Sans ça, les ICE candidates initiales du sender sont perdues
-      // → la connexion ne s'établit jamais.
       if (!state.pc) {
         if (state.pendingIceQueue) {
           state.pendingIceQueue.push(payload.candidate);
@@ -138,18 +164,24 @@
       try {
         await state.pc.addIceCandidate(payload.candidate);
       } catch (e) { /* ignore — candidates can fail benignly */ }
+    } else if (type === 'ack') {
+      // V1.3 — Lot 3 : ack du receveur. L'émetteur connait la vraie
+      // progression côté récepteur (vs son bytesSent local).
+      if (typeof payload.bytes === 'number') {
+        state.bytesAckedByReceiver = payload.bytes;
+        state.lastAckAt = Date.now();
+        updateProgress(state);
+      }
     } else if (type === 'refuse') {
       clientLog('info', '[p2p] receiver refused');
       toast(`${state.peer.displayName} a refusé`, 'warning');
-      cleanup(from, 'Refusé');
+      cleanup(state, 'Refusé');
     } else if (type === 'cancel' || type === 'bye') {
-      cleanup(from, 'Annulé');
+      cleanup(state, 'Annulé');
     }
   }
 
   async function handleIncomingOffer(peer, payload) {
-    // Préparer un état receiver mais ne pas créer la pc tant que
-    // l'utilisateur n'a pas accepté.
     const state = {
       role: 'receiver',
       peer,
@@ -157,7 +189,7 @@
       dc: null,
       pendingOfferSdp: payload.sdp,
       pendingIceQueue: [],
-      receivingFiles: [],   // [{ name, size, received: 0, chunks: [] }]
+      receivingFiles: [],
       currentFileIdx: 0,
       bytesReceived: 0,
       totalBytes: 0,
@@ -165,14 +197,17 @@
       startedAt: 0,
       uiCard: null,
       ttlTimer: null,
+      // V1.3 — Lot 2 : statut par fichier sur le receveur aussi
+      // (alimenté à la réception de file-meta).
+      fileStatuses: [],
     };
-    conns.set(peer.deviceId, state);
+    conns.set(connKey(peer.deviceId, 'receiver'), state);
 
     state.ttlTimer = setTimeout(() => {
       if (state.pc === null) {
         clientLog('warn', '[p2p] offer TTL expired');
         postSignal(peer.deviceId, 'refuse', { reason: 'ttl' });
-        cleanup(peer.deviceId, 'Expiré');
+        cleanup(state, 'Expiré');
       }
     }, ACCEPT_TTL_MS);
 
@@ -180,7 +215,7 @@
       clearTimeout(state.ttlTimer);
       if (!accepted) {
         await postSignal(peer.deviceId, 'refuse', {});
-        cleanup(peer.deviceId, 'Refusé');
+        cleanup(state, 'Refusé');
         return;
       }
       try {
@@ -201,11 +236,11 @@
         await pc.setLocalDescription(answer);
         await postSignal(peer.deviceId, 'answer', { sdp: answer });
         state.startedAt = Date.now();
-        state.uiCard = markCardSending(peer.deviceId, 0);
+        state.uiCard = markCardSending(peer.deviceId, 'connecting');
         showSticky();
       } catch (e) {
         clientLog('error', '[p2p] accept failed: ' + (e && e.message));
-        cleanup(peer.deviceId, '✗ Connexion P2P échouée');
+        cleanup(state, '✗ Connexion P2P échouée');
       }
     });
   }
@@ -237,19 +272,43 @@
       clientLog('info', '[p2p] pc state=' + cs
                        + ' for ' + state.peer.deviceId.substring(0, 8));
       if (cs === 'failed') {
-        cleanup(state.peer.deviceId, '✗ Connexion P2P échouée');
-      } else if (cs === 'closed' || cs === 'disconnected') {
-        // disconnected peut être transitoire — on attend le timeout
-        // de l'API native, qui passera failed/closed.
+        cleanup(state, '✗ Connexion P2P échouée');
+      } else if (cs === 'disconnected') {
+        // V1.3 — Lot 1 : flottement Wi-Fi transitoire. On marque la
+        // pause (sends gelés via safeSend), avec un timer de grâce
+        // de DISCONNECT_TTL_MS. Si on revient à 'connected', on
+        // reset. Sinon, on cleanup avec message clair.
+        if (!state.disconnectedSince) {
+          state.disconnectedSince = Date.now();
+          if (state.uiCard) {
+            const sub = state.uiCard.querySelector('.peer-sub');
+            if (sub) sub.textContent = 'Connexion perdue…';
+          }
+          state.disconnectTimer = setTimeout(() => {
+            if (state.disconnectedSince) {
+              cleanup(state, '✗ Wi-Fi perdu');
+            }
+          }, DISCONNECT_TTL_MS);
+        }
+      } else if (cs === 'connected') {
+        // Reprise : annule la pause si elle était active.
+        if (state.disconnectedSince) {
+          state.disconnectedSince = 0;
+          if (state.disconnectTimer) {
+            clearTimeout(state.disconnectTimer);
+            state.disconnectTimer = null;
+          }
+          if (state.uiCard && state.phase === 'sending') {
+            setCardPhase(state.uiCard, 'sending');
+          }
+        }
       }
     };
-    // Fallback : si on n'atteint pas 'connected' en 20 s, on coupe avec
-    // un message clair plutôt que de rester bloqué à 0 %.
     state.connectTimer = setTimeout(() => {
       if (pc.connectionState !== 'connected') {
         clientLog('warn', '[p2p] connect timeout (state='
                          + pc.connectionState + ')');
-        cleanup(state.peer.deviceId, '✗ Pas de route LAN');
+        cleanup(state, '✗ Pas de route LAN');
       }
     }, 20000);
   }
@@ -262,21 +321,30 @@
     dc.onopen  = () => {
       state.phase = 'sending';
       if (state.uiCard) setCardPhase(state.uiCard, 'sending');
+      // V1.3 — Lot 3 : démarre le watchdog d'ack côté émetteur.
+      // Si on push des bytes mais le receveur ne renvoie pas
+      // d'ack pendant NO_ACK_TIMEOUT_MS, on déclare silent stall.
+      state.lastAckAt = Date.now();
+      state.ackWatchdog = setInterval(() => {
+        const now = Date.now();
+        if (state.bytesSent > state.bytesAckedByReceiver
+            && now - state.lastAckAt > NO_ACK_TIMEOUT_MS) {
+          clientLog('warn', '[p2p] sender silent stall — pas d\'ack');
+          cleanup(state, '✗ Récepteur muet');
+        }
+      }, 1000);
       sendNextFile(state);
     };
     dc.onerror = (e) => {
-      // Si tout a été envoyé avant l'erreur, c'est probablement le
-      // receveur qui a fermé sa pc → on traite comme succès, pas erreur.
       if (state.allFilesSent) {
-        cleanup(state.peer.deviceId, '✓ Envoyé');
+        cleanup(state, '✓ Envoyé');
         return;
       }
       clientLog('error', '[p2p] dc error: ' + (e && e.message));
-      cleanup(state.peer.deviceId, '✗ Erreur DataChannel');
+      cleanup(state, '✗ Erreur DataChannel');
     };
     dc.onclose = () => {
-      cleanup(state.peer.deviceId,
-              state.allFilesSent ? '✓ Envoyé' : '✗ Connexion fermée');
+      cleanup(state, state.allFilesSent ? '✓ Envoyé' : '✗ Connexion fermée');
     };
   }
 
@@ -298,8 +366,14 @@
   }
 
   // Send unifié : check readyState, try/catch explicite avec log précis.
+  // V1.3 — Lot 1 : pause si state.disconnectedSince est set (flottement
+  // Wi-Fi). On attend que le pc revienne à 'connected' avant de réessayer.
   // Retourne true en succès, false en échec (le caller déclenche cleanup).
-  function safeSend(state, data, label) {
+  async function safeSend(state, data, label) {
+    while (state.disconnectedSince
+           && Date.now() - state.disconnectedSince < DISCONNECT_TTL_MS) {
+      await new Promise((r) => setTimeout(r, 200));
+    }
     if (!state.dc || state.dc.readyState !== 'open') {
       clientLog('warn', '[p2p] send skipped (' + label
                        + ') — dc state=' + (state.dc && state.dc.readyState));
@@ -317,25 +391,28 @@
 
   async function sendNextFile(state) {
     if (state.currentFileIdx >= state.files.length) {
-      // Tout est envoyé — annoncer "all-done", attendre que le buffer
-      // soit vidé, puis fermer. Le flag allFilesSent permet à
-      // dc.onerror/onclose de traiter une fermeture distante comme
-      // succès au lieu d'erreur.
+      // Tout est envoyé — annoncer all-done, attendre drain, fermer.
       await awaitDrain(state.dc);
-      safeSend(state, JSON.stringify({ kind: 'all-done' }), 'all-done');
+      await safeSend(state, JSON.stringify({ kind: 'all-done' }), 'all-done');
       state.allFilesSent = true;
+      // V1.3 — Lot 1 : timeout drain final 30 s.
+      const drainStart = Date.now();
       while (state.dc && state.dc.readyState === 'open'
              && state.dc.bufferedAmount > 0) {
+        if (Date.now() - drainStart > DRAIN_TIMEOUT_MS) {
+          clientLog('warn', '[p2p] drain timeout — close anyway');
+          break;
+        }
         await new Promise((r) => setTimeout(r, 50));
       }
       try { state.dc.close(); } catch {}
       return;
     }
     const file = state.files[state.currentFileIdx];
+    const fs = state.fileStatuses[state.currentFileIdx];
     state.startedAt = state.startedAt || Date.now();
+    fs.status = 'sending';
 
-    // Backpressure AVANT chaque JSON (le buffer peut être plein des
-    // chunks du fichier précédent). Sans ça, multi-fichier casse.
     await awaitDrain(state.dc);
 
     if (state.currentFileIdx === 0) {
@@ -344,8 +421,9 @@
         count: state.files.length,
         totalBytes: state.totalBytes,
       };
-      if (!safeSend(state, JSON.stringify(summary), 'session-meta')) {
-        cleanup(state.peer.deviceId, '✗ Erreur réseau');
+      if (!await safeSend(state, JSON.stringify(summary), 'session-meta')) {
+        fs.status = 'failed'; fs.error = 'session-meta';
+        cleanup(state, '✗ Erreur réseau');
         return;
       }
     }
@@ -356,12 +434,18 @@
       type: file.type || 'application/octet-stream',
       idx:  state.currentFileIdx,
     };
-    if (!safeSend(state, JSON.stringify(meta), 'file-meta')) {
-      cleanup(state.peer.deviceId, '✗ Erreur réseau');
+    if (!await safeSend(state, JSON.stringify(meta), 'file-meta')) {
+      fs.status = 'failed'; fs.error = 'meta';
+      // V1.3 — Lot 2 : continuer aux fichiers suivants au lieu de
+      // cleanup global. On skip celui-ci.
+      state.currentFileIdx += 1;
+      sendNextFile(state).catch((e) =>
+        clientLog('error', '[p2p] sendNextFile rec: ' + (e && e.message)));
       return;
     }
 
     const reader = file.stream().getReader();
+    let aborted = false;
     try {
       while (true) {
         const { value, done } = await reader.read();
@@ -370,57 +454,86 @@
         while (pos < value.byteLength) {
           await awaitDrain(state.dc);
           const end = Math.min(pos + CHUNK_SIZE, value.byteLength);
-          // Copie défensive (subarray = vue partagée) pour éviter
-          // que Safari interprète mal le buffer si la prochaine
-          // itération overwrite la zone source.
           const slice = new Uint8Array(value.buffer,
                                         value.byteOffset + pos,
                                         end - pos).slice();
-          if (!safeSend(state, slice, 'chunk')) {
-            cleanup(state.peer.deviceId, '✗ Erreur réseau');
+          if (!await safeSend(state, slice, 'chunk')) {
+            aborted = true;
             try { reader.cancel(); } catch {}
-            return;
+            break;
           }
           state.bytesSent += slice.byteLength;
+          fs.bytes = state.bytesSent;
           pos = end;
           updateProgress(state);
         }
+        if (aborted) break;
       }
     } catch (e) {
       clientLog('error', '[p2p] read failed: ' + (e && e.message));
-      cleanup(state.peer.deviceId, '✗ Lecture fichier');
+      fs.status = 'failed'; fs.error = 'read';
+      // Skip ce fichier, continue les suivants.
+      state.currentFileIdx += 1;
+      sendNextFile(state).catch(() => {});
+      return;
+    }
+
+    if (aborted) {
+      fs.status = 'failed'; fs.error = 'send';
+      state.currentFileIdx += 1;
+      sendNextFile(state).catch(() => {});
       return;
     }
 
     await awaitDrain(state.dc);
-    if (!safeSend(state, JSON.stringify({
+    if (!await safeSend(state, JSON.stringify({
         kind: 'file-end', idx: state.currentFileIdx }), 'file-end')) {
-      cleanup(state.peer.deviceId, '✗ Erreur réseau');
+      fs.status = 'failed'; fs.error = 'end';
+      state.currentFileIdx += 1;
+      sendNextFile(state).catch(() => {});
       return;
     }
+    fs.status = 'sent';
     state.currentFileIdx += 1;
     sendNextFile(state).catch((e) =>
-      clientLog('error', '[p2p] sendNextFile rec failed: '
-                       + (e && e.message)));
+      clientLog('error', '[p2p] sendNextFile rec: ' + (e && e.message)));
   }
 
   // ====================================================================
   // DataChannel RECEIVER : recompose meta + chunks → Blob → download
   // ====================================================================
   function wireReceiverDc(dc, state) {
-    dc.onopen  = () => clientLog('info', '[p2p] receiver dc open');
+    dc.onopen  = () => {
+      clientLog('info', '[p2p] receiver dc open');
+      // V1.3 — Lot 1 : watchdog. DataChannel ouvert mais 0 byte reçu
+      // dans WATCHDOG_NO_DATA_MS → cleanup au lieu d'attendre.
+      state.noDataWatchdog = setTimeout(() => {
+        if (state.bytesReceived === 0) {
+          clientLog('warn', '[p2p] receiver no-data watchdog fired');
+          cleanup(state, '✗ Pas de données');
+        }
+      }, WATCHDOG_NO_DATA_MS);
+      // V1.3 — Lot 3 : envoi périodique d'ack vers l'émetteur.
+      // Permet à l'émetteur d'avoir une vraie progression et de
+      // détecter les silent stalls de son côté.
+      state.ackTimer = setInterval(() => {
+        if (dc.readyState !== 'open') return;
+        try {
+          dc.send(JSON.stringify({
+            kind: 'ack', bytes: state.bytesReceived }));
+        } catch { /* dc ferme : on s'en fout */ }
+      }, ACK_INTERVAL_MS);
+    };
     dc.onerror = (e) => {
       if (state.allDoneSeen) {
-        cleanup(state.peer.deviceId, '✓ Reçu');
+        cleanup(state, '✓ Reçu');
         return;
       }
       clientLog('error', '[p2p] receiver dc error: ' + (e && e.message));
-      cleanup(state.peer.deviceId, '✗ Erreur DataChannel');
+      cleanup(state, '✗ Erreur DataChannel');
     };
     dc.onclose = () => {
-      // Le sender ferme proprement après avoir flushé all-done.
-      cleanup(state.peer.deviceId,
-              state.allDoneSeen ? '✓ Reçu' : '✗ Connexion fermée');
+      cleanup(state, state.allDoneSeen ? '✓ Reçu' : '✗ Connexion fermée');
     };
     dc.onmessage = (ev) => {
       const data = ev.data;
@@ -430,13 +543,17 @@
         catch { return; }
         handleReceiverControl(msg, state);
       } else {
-        // Binary chunk pour le fichier courant.
         const cur = state.receivingFiles[state.receivingFiles.length - 1];
         if (!cur) return;
         cur.chunks.push(data);
         cur.received   += data.byteLength;
         state.bytesReceived += data.byteLength;
         updateProgress(state);
+        // 1er chunk reçu : on annule le watchdog no-data.
+        if (state.noDataWatchdog) {
+          clearTimeout(state.noDataWatchdog);
+          state.noDataWatchdog = null;
+        }
       }
     };
   }
@@ -446,17 +563,19 @@
       state.totalBytes = msg.totalBytes || 0;
       state.startedAt  = Date.now();
     } else if (msg.kind === 'file-meta') {
+      const idx = state.fileStatuses.length;
       state.receivingFiles.push({
         name: msg.name, size: msg.size, type: msg.type,
         received: 0, chunks: [],
       });
+      // V1.3 — Lot 2 : statut par fichier côté receveur aussi.
+      state.fileStatuses.push({
+        idx, name: msg.name, size: msg.size,
+        status: 'sending', bytes: 0, error: null,
+      });
     } else if (msg.kind === 'file-end') {
       finalizeReceivedFile(state);
     } else if (msg.kind === 'all-done') {
-      // Marque l'UI ✓ Reçu mais NE PAS fermer ici. C'est l'émetteur
-      // qui ferme proprement après flush ; notre dc.onclose finalisera
-      // le cleanup. Fermer ici = race qui fait apparaitre "Erreur
-      // DataChannel" côté émetteur.
       state.allDoneSeen = true;
       if (state.uiCard) {
         const sub = state.uiCard.querySelector('.peer-sub');
@@ -468,6 +587,16 @@
   function finalizeReceivedFile(state) {
     const cur = state.receivingFiles[state.receivingFiles.length - 1];
     if (!cur) return;
+    const fs = state.fileStatuses[state.fileStatuses.length - 1];
+    // V1.3 — Lot 1 : intégrité. Si la taille reçue ne matche pas la
+    // taille annoncée, on marque le fichier ✗ et on ne télécharge PAS.
+    if (cur.size && cur.received !== cur.size) {
+      clientLog('warn', '[p2p] file truncated: ' + cur.name
+                       + ' received=' + cur.received + ' expected=' + cur.size);
+      if (fs) { fs.status = 'failed'; fs.error = 'taille_invalide'; }
+      cur.chunks = [];
+      return;
+    }
     const blob = new Blob(cur.chunks, { type: cur.type });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
@@ -477,7 +606,8 @@
     a.click();
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 2000);
-    cur.chunks = [];  // libère la RAM
+    cur.chunks = [];
+    if (fs) { fs.status = 'received'; fs.bytes = cur.received; }
   }
 
   // ====================================================================
@@ -495,16 +625,12 @@
       if (res.status === 401) {
         if (window.LTR.goToLogin) window.LTR.goToLogin();
       } else if (res.status === 404) {
-        // Le destinataire n'est plus connecté (logout, onglet fermé,
-        // session expirée). On notifie l'utilisateur côté émetteur
-        // au lieu de rester bloqué silencieusement.
         clientLog('warn', '[p2p] target offline ' + toDeviceId.substring(0, 8));
-        const state = conns.get(toDeviceId);
-        if (state && state.role === 'sender'
-            && state.phase !== 'sending') {
+        const state = getConn(toDeviceId, 'sender');
+        if (state && state.phase !== 'sending') {
           const name = state.peer ? state.peer.displayName : 'Le destinataire';
           toast(`${name} n'est plus connecté`, 'warning');
-          cleanup(toDeviceId, 'Hors-ligne');
+          cleanup(state, 'Hors-ligne');
         }
       }
     } catch (e) {
@@ -513,14 +639,12 @@
   }
 
   // Annulation côté émetteur déclenchée par le bouton ✕ de la card.
-  // Émet un signal cancel vers le receveur (qui ferme sa modale ou
-  // sa connexion) et nettoie l'état local.
   function cancelOutgoing(deviceId) {
-    const state = conns.get(deviceId);
-    if (!state || state.role !== 'sender') return;
+    const state = getConn(deviceId, 'sender');
+    if (!state) return;
     clientLog('info', '[p2p] sender cancel ' + deviceId.substring(0, 8));
     postSignal(deviceId, 'cancel', { reason: 'user' });
-    cleanup(deviceId, 'Annulé');
+    cleanup(state, 'Annulé');
   }
 
   // ====================================================================
@@ -624,10 +748,16 @@
   }
 
   function updateProgress(state) {
-    const total = state.role === 'sender' ? state.totalBytes
-                                           : state.totalBytes;
-    const done  = state.role === 'sender' ? state.bytesSent
-                                           : state.bytesReceived;
+    const total = state.totalBytes;
+    // V1.3 — Lot 3 : sender utilise la VRAIE progression (ack du
+    // receveur) au lieu de bytesSent local. Si pas encore d'ack,
+    // fallback sur bytesSent.
+    let done;
+    if (state.role === 'sender') {
+      done = state.bytesAckedByReceiver || state.bytesSent;
+    } else {
+      done = state.bytesReceived;
+    }
     if (!total) return;
     const pct  = Math.floor((done / total) * 100);
     const dt   = Math.max(0.001, (Date.now() - state.startedAt) / 1000);
@@ -663,16 +793,18 @@
     bar.hidden = false;
   }
 
-  function cleanup(deviceId, label) {
-    const state = conns.get(deviceId);
-    if (!state) return;
+  // V1.3 — Lot 4 : cleanup prend désormais un state directement.
+  // Permet d'éviter la confusion avec deviceId quand 2 connexions
+  // existent pour le même peer (sender + receiver).
+  function cleanup(state, label) {
+    if (!state || state._cleaned) return;
+    state._cleaned = true;
     try { if (state.dc) state.dc.close(); } catch {}
     try { if (state.pc) state.pc.close(); } catch {}
     if (state.uiCard) {
       const sub = state.uiCard.querySelector('.peer-sub');
       if (sub && label) sub.textContent = label;
       state.uiCard.classList.remove('peer-card--sending');
-      // Restaurer le platformLabel original après 3s.
       const peer = state.peer;
       setTimeout(() => {
         if (sub) sub.textContent = peer.platformLabel || '';
@@ -680,19 +812,25 @@
         if (bar) bar.remove();
       }, 3000);
     }
-    if (state.ttlTimer) clearTimeout(state.ttlTimer);
-    if (state.connectTimer) clearTimeout(state.connectTimer);
-    if (state.senderTtl) clearTimeout(state.senderTtl);
+    if (state.ttlTimer)        clearTimeout(state.ttlTimer);
+    if (state.connectTimer)    clearTimeout(state.connectTimer);
+    if (state.senderTtl)       clearTimeout(state.senderTtl);
+    if (state.disconnectTimer) clearTimeout(state.disconnectTimer);
+    if (state.noDataWatchdog)  clearTimeout(state.noDataWatchdog);
+    if (state.ackTimer)        clearInterval(state.ackTimer);
+    if (state.ackWatchdog)     clearInterval(state.ackWatchdog);
     if (state.uiCard) {
       const x = state.uiCard.querySelector('.peer-cancel-btn');
       if (x) x.remove();
     }
-    conns.delete(deviceId);
+    if (state.peer && state.role) {
+      conns.delete(connKey(state.peer.deviceId, state.role));
+    }
     refreshSticky();
   }
 
   function cleanupAll() {
-    Array.from(conns.keys()).forEach((id) => cleanup(id, ''));
+    Array.from(conns.values()).forEach((s) => cleanup(s, ''));
   }
 
   // Toast simple — on réutilise un container global s'il existe.
