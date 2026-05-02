@@ -280,13 +280,49 @@
     };
   }
 
+  // Attend que le buffer SCTP soit sous BUFFER_HIGH avant le prochain
+  // send. Utilisé entre chunks ET avant chaque message JSON (file-meta,
+  // file-end, all-done) pour éviter qu'un dc.send déborde le buffer
+  // côté Safari → OperationError silencieux → multi-fichier cassé.
+  async function awaitDrain(dc) {
+    while (dc.readyState === 'open' && dc.bufferedAmount > BUFFER_HIGH) {
+      await new Promise((r) => {
+        const onLow = () => {
+          dc.removeEventListener('bufferedamountlow', onLow);
+          r();
+        };
+        dc.addEventListener('bufferedamountlow', onLow);
+        setTimeout(onLow, 200);
+      });
+    }
+  }
+
+  // Send unifié : check readyState, try/catch explicite avec log précis.
+  // Retourne true en succès, false en échec (le caller déclenche cleanup).
+  function safeSend(state, data, label) {
+    if (!state.dc || state.dc.readyState !== 'open') {
+      clientLog('warn', '[p2p] send skipped (' + label
+                       + ') — dc state=' + (state.dc && state.dc.readyState));
+      return false;
+    }
+    try {
+      state.dc.send(data);
+      return true;
+    } catch (e) {
+      clientLog('error', '[p2p] send failed (' + label + '): '
+                       + (e && e.message));
+      return false;
+    }
+  }
+
   async function sendNextFile(state) {
     if (state.currentFileIdx >= state.files.length) {
       // Tout est envoyé — annoncer "all-done", attendre que le buffer
       // soit vidé, puis fermer. Le flag allFilesSent permet à
       // dc.onerror/onclose de traiter une fermeture distante comme
       // succès au lieu d'erreur.
-      try { state.dc.send(JSON.stringify({ kind: 'all-done' })); } catch {}
+      await awaitDrain(state.dc);
+      safeSend(state, JSON.stringify({ kind: 'all-done' }), 'all-done');
       state.allFilesSent = true;
       while (state.dc && state.dc.readyState === 'open'
              && state.dc.bufferedAmount > 0) {
@@ -298,14 +334,20 @@
     const file = state.files[state.currentFileIdx];
     state.startedAt = state.startedAt || Date.now();
 
-    // Annonce meta (JSON) AVANT de pousser le binaire.
+    // Backpressure AVANT chaque JSON (le buffer peut être plein des
+    // chunks du fichier précédent). Sans ça, multi-fichier casse.
+    await awaitDrain(state.dc);
+
     if (state.currentFileIdx === 0) {
       const summary = {
         kind: 'session-meta',
         count: state.files.length,
         totalBytes: state.totalBytes,
       };
-      state.dc.send(JSON.stringify(summary));
+      if (!safeSend(state, JSON.stringify(summary), 'session-meta')) {
+        cleanup(state.peer.deviceId, '✗ Erreur réseau');
+        return;
+      }
     }
     const meta = {
       kind: 'file-meta',
@@ -314,43 +356,52 @@
       type: file.type || 'application/octet-stream',
       idx:  state.currentFileIdx,
     };
-    state.dc.send(JSON.stringify(meta));
+    if (!safeSend(state, JSON.stringify(meta), 'file-meta')) {
+      cleanup(state.peer.deviceId, '✗ Erreur réseau');
+      return;
+    }
 
-    let offset = 0;
     const reader = file.stream().getReader();
     try {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        // value = Uint8Array. On chunk en CHUNK_SIZE.
         let pos = 0;
         while (pos < value.byteLength) {
-          // backpressure
-          while (state.dc.bufferedAmount > BUFFER_HIGH) {
-            await new Promise((r) => {
-              const onLow = () => { state.dc.removeEventListener('bufferedamountlow', onLow); r(); };
-              state.dc.addEventListener('bufferedamountlow', onLow);
-              setTimeout(onLow, 200);  // safety fallback
-            });
-          }
+          await awaitDrain(state.dc);
           const end = Math.min(pos + CHUNK_SIZE, value.byteLength);
-          const slice = value.subarray(pos, end);
-          state.dc.send(slice);
-          offset       += slice.byteLength;
+          // Copie défensive (subarray = vue partagée) pour éviter
+          // que Safari interprète mal le buffer si la prochaine
+          // itération overwrite la zone source.
+          const slice = new Uint8Array(value.buffer,
+                                        value.byteOffset + pos,
+                                        end - pos).slice();
+          if (!safeSend(state, slice, 'chunk')) {
+            cleanup(state.peer.deviceId, '✗ Erreur réseau');
+            try { reader.cancel(); } catch {}
+            return;
+          }
           state.bytesSent += slice.byteLength;
           pos = end;
           updateProgress(state);
         }
       }
     } catch (e) {
-      clientLog('error', '[p2p] read/send failed: ' + (e && e.message));
+      clientLog('error', '[p2p] read failed: ' + (e && e.message));
       cleanup(state.peer.deviceId, '✗ Lecture fichier');
       return;
     }
 
-    state.dc.send(JSON.stringify({ kind: 'file-end', idx: state.currentFileIdx }));
+    await awaitDrain(state.dc);
+    if (!safeSend(state, JSON.stringify({
+        kind: 'file-end', idx: state.currentFileIdx }), 'file-end')) {
+      cleanup(state.peer.deviceId, '✗ Erreur réseau');
+      return;
+    }
     state.currentFileIdx += 1;
-    sendNextFile(state);
+    sendNextFile(state).catch((e) =>
+      clientLog('error', '[p2p] sendNextFile rec failed: '
+                       + (e && e.message)));
   }
 
   // ====================================================================
