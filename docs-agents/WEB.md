@@ -3,6 +3,82 @@
 > Guide central pour tout agent / session Claude qui travaille sur la
 > couche `ltr::web`. Lire avant toute modification.
 
+## 🆕 V1.4 — Sprint Clipboard Paste (2026-05-02)
+
+Permet d'envoyer le contenu du presse-papier (texte, image PNG,
+fichiers/dossiers) en un clic ou via raccourci Cmd+V / Ctrl+V.
+
+### API uniforme
+
+`include/ltr/ui/clipboard_paste.hpp` :
+```cpp
+struct ClipboardPaste {
+    enum class Kind { None, Text, Image, Files };
+    Kind kind = Kind::None;
+    std::string text;
+    std::vector<std::uint8_t> imageBytes;
+    std::string imageExt;        // "png"
+    std::vector<std::filesystem::path> files;
+};
+ClipboardPaste readClipboard();
+```
+
+### Implémentations natives (compile-time)
+
+Pattern `LTR_CLIPBOARD_SRC` identique à `LTR_DRAG_DROP_SRC` :
+
+- **macOS** (`clipboard_paste_mac.mm`) : NSPasteboard.
+  - NSPasteboardTypeFileURL → vector<path>
+  - NSPasteboardTypePNG direct, ou TIFF→PNG via NSBitmapImageRep
+  - NSPasteboardTypeString → UTF-8
+- **Windows** (`clipboard_paste_win.cpp`) : OpenClipboard avec retry
+  3× × 10 ms (mutex système).
+  - CF_HDROP → vector<path>
+  - CF_DIB → conversion BGR(A)→RGBA + encodage PNG via miniz
+    (IHDR + IDAT zlib + IEND, ~80 LOC)
+  - CF_UNICODETEXT → UTF-16→UTF-8
+- **Linux** (`clipboard_paste_stub.cpp`) : `sf::Clipboard::getString`
+  pour le texte uniquement, image/files non supportés.
+
+Priorité de détection : **Files > Image > Text > None**.
+
+### AppController
+
+- `pasteFromClipboard()` : appelle `readClipboard()` et dispatch.
+- `clipboardTempDir()` : `<temp>/ltr-clipboard/`. Texte/Image écrits
+  dans `clipboard-YYYYMMDD-HHmmss.{txt|png}` puis `addFiles({path})`.
+- Boot : `ensureClipboardTempDir` + `purgeOldClipboardTemp` (>24 h).
+- Auto-clean post-`TransferDoneEvent` étendu : si `parent_path() ==
+  clipboardTempDir()` → `std::filesystem::remove(p)` après envoi.
+
+### MainScreen
+
+- 3e entrée menu addMenu_ : "📋  Coller (⌘V)" Mac / "(Ctrl+V)" Win.
+- handleEvent : `Cmd+V` (Mac, `key.system`) ou `Ctrl+V` (Win,
+  `key.control`) → `controller_.pasteFromClipboard()`.
+- Skip si `ipInput_.hasFocus()` (paste local au champ texte gagne).
+
+### Web
+
+- Bouton `#paste-btn` dans `index.html` (hidden par défaut).
+- `setupPasteButton()` dans `upload.js` : check
+  `navigator.clipboard.read` → show button.
+- `handlePaste()` async :
+  - Lit `image/png` via `it.getType('image/png')`
+  - Lit `text/plain` via `navigator.clipboard.readText()`
+  - Crée `new File([blob], 'clipboard-XXX.{png|txt}')`
+  - Appelle `uploadFiles()` existant
+- ⚠ Limite browser : navigator.clipboard NE DONNE PAS accès aux
+  fichiers (sécurité). Pour des fichiers, drag-drop ou picker.
+- Permission refusée → toast « Autorisation presse-papier refusée ».
+
+### Tests V1.4
+
+`tests/test_clipboard_stub.cpp` : invariants par Kind (None/Text/
+Image/Files), pas de crash. **15/15 tests passent**.
+
+---
+
 ## 🆕 V1.3 — Sprint Web P2P V1.3 — Robustesse + Liste UI (2026-05-02)
 
 V1.3 durcit le P2P et ajoute une visibilité par-fichier persistante.

@@ -16,6 +16,73 @@
     setupFileInputChange('#file-input');
     setupFileInputChange('#folder-input');
     setupFolderButtonVisibility();
+    setupPasteButton();
+  }
+
+  // V1.4 — Sprint Clipboard Paste : bouton « Coller » côté web.
+  // Visible si navigator.clipboard.read est dispo (Chrome 76+, Safari 13.1+).
+  // À noter : navigator.clipboard.read NE DONNE PAS accès aux fichiers
+  // (sécurité browser). On ne lit donc que text/plain et image/png.
+  // Pour des fichiers, l'utilisateur doit utiliser le picker ou le
+  // drag-drop existants.
+  function setupPasteButton() {
+    const btn = document.getElementById('paste-btn');
+    if (!btn) return;
+    const supported = !!(navigator.clipboard && navigator.clipboard.read);
+    if (!supported) {
+      btn.hidden = true;
+      return;
+    }
+    btn.hidden = false;
+    btn.addEventListener('click', () => handlePaste());
+  }
+
+  function pasteToast(text, kind) {
+    if (window.LTR.p2p && window.LTR.p2p.toast) {
+      window.LTR.p2p.toast(text, kind || 'info');
+    } else {
+      clientLog('info', '[paste] ' + text);
+    }
+  }
+
+  function timestampSuffix() {
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    return d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate())
+         + '-' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+  }
+
+  async function handlePaste() {
+    try {
+      // Files non accessibles via navigator.clipboard côté web : on
+      // tente d'abord image/png, sinon text/plain.
+      const items = await navigator.clipboard.read();
+      const fakeFiles = [];
+      for (const it of items) {
+        if (it.types && it.types.includes('image/png')) {
+          const blob = await it.getType('image/png');
+          const name = 'clipboard-' + timestampSuffix() + '.png';
+          fakeFiles.push(new File([blob], name, { type: 'image/png' }));
+        } else if (it.types && it.types.includes('text/plain')) {
+          const text = await navigator.clipboard.readText();
+          const name = 'clipboard-' + timestampSuffix() + '.txt';
+          fakeFiles.push(new File([text], name, { type: 'text/plain' }));
+        }
+      }
+      if (fakeFiles.length === 0) {
+        pasteToast('Presse-papier vide ou format non supporté', 'warning');
+        return;
+      }
+      // Réutilise uploadFiles existant comme s'il s'agissait du picker.
+      await uploadFiles(fakeFiles);
+      pasteToast(fakeFiles.length === 1
+        ? `${fakeFiles[0].name} envoyé`
+        : `${fakeFiles.length} éléments envoyés`,
+        'success');
+    } catch (e) {
+      clientLog('warn', '[paste] failed: ' + (e && e.message));
+      pasteToast('Autorisation presse-papier refusée — voir paramètres navigateur', 'warning');
+    }
   }
 
   function setupDropZone() {
