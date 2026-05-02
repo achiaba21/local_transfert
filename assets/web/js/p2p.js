@@ -77,8 +77,23 @@
       fileStatuses: files.map((f, i) => ({
         idx: i, name: f.name, size: f.size,
         status: 'pending', bytes: 0, error: null,
+        entryId: null,
       })),
     };
+    // V1.3 — Lot 2 : enregistre chaque fichier dans le Registry pour
+    // la liste UI persistante.
+    if (window.LTR.transferRegistry) {
+      files.forEach((f, i) => {
+        const id = window.LTR.transferRegistry.addEntry({
+          direction: 'out',
+          peer,
+          name: f.name,
+          size: f.size,
+          file: f,
+        });
+        state.fileStatuses[i].entryId = id;
+      });
+    }
     conns.set(connKey(deviceId, 'sender'), state);
     state.uiCard = markCardSending(deviceId, 'waiting');
     showSticky();
@@ -389,6 +404,22 @@
     }
   }
 
+  // V1.3 — Lot 2 : helper pour propager les changements de status au
+  // Registry (qui maintient la liste UI persistante).
+  function syncFileStatus(state, fs) {
+    if (!fs || !fs.entryId || !window.LTR.transferRegistry) return;
+    window.LTR.transferRegistry.updateEntry(fs.entryId, {
+      status: fs.status, bytes: fs.bytes, error: fs.error,
+    });
+    // Notif son+vibration sur transitions terminales.
+    if ((fs.status === 'sent' || fs.status === 'received')
+        && state.peer) {
+      window.LTR.transferRegistry.notifyComplete(
+        state.role === 'sender' ? 'out' : 'in',
+        fs.name, state.peer.displayName);
+    }
+  }
+
   async function sendNextFile(state) {
     if (state.currentFileIdx >= state.files.length) {
       // Tout est envoyé — annoncer all-done, attendre drain, fermer.
@@ -412,6 +443,7 @@
     const fs = state.fileStatuses[state.currentFileIdx];
     state.startedAt = state.startedAt || Date.now();
     fs.status = 'sending';
+    syncFileStatus(state, fs);
 
     await awaitDrain(state.dc);
 
@@ -423,6 +455,7 @@
       };
       if (!await safeSend(state, JSON.stringify(summary), 'session-meta')) {
         fs.status = 'failed'; fs.error = 'session-meta';
+        syncFileStatus(state, fs);
         cleanup(state, '✗ Erreur réseau');
         return;
       }
@@ -436,8 +469,7 @@
     };
     if (!await safeSend(state, JSON.stringify(meta), 'file-meta')) {
       fs.status = 'failed'; fs.error = 'meta';
-      // V1.3 — Lot 2 : continuer aux fichiers suivants au lieu de
-      // cleanup global. On skip celui-ci.
+      syncFileStatus(state, fs);
       state.currentFileIdx += 1;
       sendNextFile(state).catch((e) =>
         clientLog('error', '[p2p] sendNextFile rec: ' + (e && e.message)));
@@ -472,7 +504,7 @@
     } catch (e) {
       clientLog('error', '[p2p] read failed: ' + (e && e.message));
       fs.status = 'failed'; fs.error = 'read';
-      // Skip ce fichier, continue les suivants.
+      syncFileStatus(state, fs);
       state.currentFileIdx += 1;
       sendNextFile(state).catch(() => {});
       return;
@@ -480,6 +512,7 @@
 
     if (aborted) {
       fs.status = 'failed'; fs.error = 'send';
+      syncFileStatus(state, fs);
       state.currentFileIdx += 1;
       sendNextFile(state).catch(() => {});
       return;
@@ -489,11 +522,14 @@
     if (!await safeSend(state, JSON.stringify({
         kind: 'file-end', idx: state.currentFileIdx }), 'file-end')) {
       fs.status = 'failed'; fs.error = 'end';
+      syncFileStatus(state, fs);
       state.currentFileIdx += 1;
       sendNextFile(state).catch(() => {});
       return;
     }
     fs.status = 'sent';
+    fs.bytes = fs.size;
+    syncFileStatus(state, fs);
     state.currentFileIdx += 1;
     sendNextFile(state).catch((e) =>
       clientLog('error', '[p2p] sendNextFile rec: ' + (e && e.message)));
@@ -568,11 +604,21 @@
         name: msg.name, size: msg.size, type: msg.type,
         received: 0, chunks: [],
       });
-      // V1.3 — Lot 2 : statut par fichier côté receveur aussi.
-      state.fileStatuses.push({
+      const fs = {
         idx, name: msg.name, size: msg.size,
-        status: 'sending', bytes: 0, error: null,
-      });
+        status: 'sending', bytes: 0, error: null, entryId: null,
+      };
+      // V1.3 — Lot 2 : enregistre l'entry receveur pour la liste UI.
+      if (window.LTR.transferRegistry) {
+        fs.entryId = window.LTR.transferRegistry.addEntry({
+          direction: 'in',
+          peer: state.peer,
+          name: msg.name,
+          size: msg.size,
+        });
+      }
+      state.fileStatuses.push(fs);
+      syncFileStatus(state, fs);
     } else if (msg.kind === 'file-end') {
       finalizeReceivedFile(state);
     } else if (msg.kind === 'all-done') {
@@ -593,7 +639,10 @@
     if (cur.size && cur.received !== cur.size) {
       clientLog('warn', '[p2p] file truncated: ' + cur.name
                        + ' received=' + cur.received + ' expected=' + cur.size);
-      if (fs) { fs.status = 'failed'; fs.error = 'taille_invalide'; }
+      if (fs) {
+        fs.status = 'failed'; fs.error = 'taille_invalide';
+        syncFileStatus(state, fs);
+      }
       cur.chunks = [];
       return;
     }
@@ -607,7 +656,11 @@
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 2000);
     cur.chunks = [];
-    if (fs) { fs.status = 'received'; fs.bytes = cur.received; }
+    if (fs) {
+      fs.status = 'received';
+      fs.bytes = cur.received;
+      syncFileStatus(state, fs);
+    }
   }
 
   // ====================================================================
@@ -850,5 +903,5 @@
   }
 
   window.LTR = window.LTR || {};
-  window.LTR.p2p = { startSendTo, handleSignal, cleanupAll };
+  window.LTR.p2p = { startSendTo, handleSignal, cleanupAll, toast };
 })();

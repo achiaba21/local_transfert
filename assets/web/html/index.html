@@ -89,9 +89,27 @@
 
     <footer class="transfers-bar" aria-labelledby="transfers-title">
       <h2 id="transfers-title" class="overline">
-        Transferts · <span id="tx-count">0</span>
+        Transferts
       </h2>
-      <div class="transfers-list" id="transfers-list"></div>
+      <!-- V1.3 — Sprint Web P2P V1.3 : tabs Host (host↔web) / P2P (web↔web). -->
+      <div class="tx-tabs" role="tablist" aria-label="Type de transfert">
+        <button type="button" class="tx-tab tx-tab-active" id="tx-tab-host"
+                role="tab" aria-selected="true"
+                aria-controls="transfers-list-host">
+          Host · <span id="tx-count">0</span>
+        </button>
+        <button type="button" class="tx-tab" id="tx-tab-p2p"
+                role="tab" aria-selected="false"
+                aria-controls="p2p-transfers-list">
+          P2P · <span id="p2p-tab-count">0</span>
+        </button>
+      </div>
+      <div class="transfers-list" id="transfers-list-host"
+           role="tabpanel" aria-labelledby="tx-tab-host">
+        <div class="transfers-list" id="transfers-list"></div>
+      </div>
+      <ul class="p2p-transfers-list" id="p2p-transfers-list" hidden
+          role="tabpanel" aria-labelledby="tx-tab-p2p"></ul>
     </footer>
 
   </section>
@@ -133,8 +151,9 @@
 <script src="/common.js"   defer></script>
 <script src="/upload.js"   defer></script>
 <script src="/download.js" defer></script>
-<script src="/peers.js"    defer></script>
-<script src="/p2p.js"      defer></script>
-<script src="/app.js"      defer></script>
+<script src="/peers.js"             defer></script>
+<script src="/transfer_registry.js" defer></script>
+<script src="/p2p.js"               defer></script>
+<script src="/app.js"               defer></script>
 </body>
 </html>

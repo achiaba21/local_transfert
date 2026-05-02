@@ -40,6 +40,11 @@
       // Délègue aux modules dédiés (upload.js, download.js, peers.js).
       if (window.LTR.initUpload)   window.LTR.initUpload();
       if (window.LTR.initDownload) window.LTR.initDownload();
+      // V1.3 — Sprint Web P2P V1.3 : registry + tabs Host/P2P.
+      if (window.LTR.transferRegistry) {
+        window.LTR.transferRegistry.init();
+      }
+      setupTxTabs();
       // V1.2 — Sprint Web P2P : annuaire + handler SSE web-peers.
       if (window.LTR.peers && window.LTR.peers.init) {
         window.LTR.peers.init();
@@ -66,6 +71,26 @@
       clientLog('error', '[app] boot threw: ' + (e && e.message));
       goToLogin();
     }
+  }
+
+  // ==================== TX TABS (V1.3) ====================
+  function setupTxTabs() {
+    const tabHost = $('#tx-tab-host');
+    const tabP2p  = $('#tx-tab-p2p');
+    const paneHost = $('#transfers-list-host');
+    const paneP2p  = $('#p2p-transfers-list');
+    if (!tabHost || !tabP2p || !paneHost || !paneP2p) return;
+    function activate(which) {
+      const isHost = (which === 'host');
+      tabHost.classList.toggle('tx-tab-active', isHost);
+      tabP2p .classList.toggle('tx-tab-active', !isHost);
+      tabHost.setAttribute('aria-selected', String(isHost));
+      tabP2p .setAttribute('aria-selected', String(!isHost));
+      paneHost.hidden = !isHost;
+      paneP2p .hidden =  isHost;
+    }
+    tabHost.addEventListener('click', () => activate('host'));
+    tabP2p .addEventListener('click', () => activate('p2p'));
   }
 
   // ==================== LOGOUT ====================
