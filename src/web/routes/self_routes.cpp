@@ -9,11 +9,12 @@
 #include "ltr/core/logger.hpp"
 #include "ltr/web/self_binary.hpp"
 #include "ltr/web/web_service.hpp"
+#include "ltr/web/routes/multi_server.hpp"
 
 namespace ltr::web::routes {
 
 void registerSelf(WebService& svc) {
-    auto& server = svc.httpServer().raw();
+    auto server = routes::routerOf(svc);
 
     server.Get("/download/self", [](const httplib::Request&,
                                      httplib::Response& res) {

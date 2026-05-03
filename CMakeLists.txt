@@ -161,6 +161,7 @@ add_library(ltr_core STATIC
     src/web/web_service.cpp
     src/web/web_session_store.cpp
     src/web/display_name.cpp
+    src/web/cert_manager.cpp
     src/web/download_ticket_store.cpp
     src/web/sse_channel.cpp
     src/web/sse_broadcaster.cpp
@@ -181,12 +182,16 @@ add_library(ltr_core STATIC
 )
 target_include_directories(ltr_core PUBLIC include ${LTR_WEB_GEN_DIR})
 add_dependencies(ltr_core ltr_web_assets)
+# V1.6.4 : openssl pour HTTPS (cpp-httplib SSLServer) + TOFU Ed25519.
+target_compile_definitions(ltr_core PUBLIC CPPHTTPLIB_OPENSSL_SUPPORT)
 target_link_libraries(ltr_core
     PUBLIC
         sfml-network
         sfml-system
         sfml-graphics
         nlohmann_json::nlohmann_json
+        OpenSSL::SSL
+        OpenSSL::Crypto
     PRIVATE
         picosha2
         cpphttplib

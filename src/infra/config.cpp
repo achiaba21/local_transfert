@@ -160,6 +160,10 @@ bool deviceNameContainsIp(const std::string& name) {
 
 } // namespace
 
+std::filesystem::path Config::configDir() {
+    return configPath().parent_path();
+}
+
 std::filesystem::path Config::configPath() {
 #ifdef _WIN32
     std::filesystem::path base;

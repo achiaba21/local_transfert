@@ -35,6 +35,10 @@ struct Config {
 
     // Emplacement du fichier de configuration.
     static std::filesystem::path configPath();
+
+    // V1.6.4 — Sprint Sécurité : dossier de configuration partagé
+    // (cert.pem, identity.json, known_peers.json). Parent de configPath().
+    static std::filesystem::path configDir();
 };
 
 // Helpers.

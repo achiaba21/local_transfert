@@ -9,11 +9,12 @@
 #include "ltr/core/logger.hpp"
 #include "ltr/web/routes/route_helpers.hpp"
 #include "ltr/web/web_service.hpp"
+#include "ltr/web/routes/multi_server.hpp"
 
 namespace ltr::web::routes {
 
 void registerEvents(WebService& svc) {
-    auto& server = svc.httpServer().raw();
+    auto server = routes::routerOf(svc);
 
     server.Get("/api/events", [&svc](const httplib::Request& req,
                                       httplib::Response& res) {

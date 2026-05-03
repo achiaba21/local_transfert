@@ -14,6 +14,7 @@
 #include "ltr/infra/filesystem_service.hpp"
 #include "ltr/web/streaming_zip_source.hpp"
 #include "ltr/web/routes/route_registrar.hpp"
+#include "ltr/web/cert_manager.hpp"
 
 namespace ltr::web {
 
@@ -61,7 +62,20 @@ std::string WebService::make6DigitPin() {
 void WebService::start() {
     if (running_.exchange(true)) return;
 
-    // Enregistrement des routes (impl dans routes/route_registrar.cpp).
+    // V1.6.4 — Sprint Sécurité : génère ou charge le cert auto-signé
+    // si certCfgDir_ est défini, puis crée le 2e server HTTPS.
+    if (!certCfgDir_.empty()) {
+        auto cert = loadOrGenerate(certCfgDir_);
+        if (!cert.certPem.empty()) {
+            fingerprint_ = cert.fingerprintSha256;
+            httpsServer_ = std::make_unique<HttpServer>(
+                cert.certPem, cert.keyPem);
+        } else {
+            core::log_warn("WebService: cert generation failed — HTTPS off");
+        }
+    }
+
+    // Enregistrement des routes sur tous les servers (HTTP + HTTPS).
     routes::registerAll(*this);
 
     const std::uint16_t p = server_.start(
@@ -72,6 +86,19 @@ void WebService::start() {
         return;
     }
     port_.store(p);
+
+    // V1.6.4 : démarre HTTPS sur 45457 (fallback 45458, 45459).
+    if (httpsServer_) {
+        const std::uint16_t pHttps = httpsServer_->start("0.0.0.0", 45457, 3);
+        portHttps_.store(pHttps);
+        if (pHttps != 0) {
+            core::log_info("WebService HTTPS démarré — port="
+                           + std::to_string(pHttps)
+                           + " fp=" + fingerprint_.substr(0, 23) + "...");
+        } else {
+            core::log_warn("WebService HTTPS: aucun port libre (45457-45459)");
+        }
+    }
 
     keepaliveThread_ = std::thread([this]{
         try { keepaliveLoop(); }
@@ -90,6 +117,7 @@ void WebService::stop() {
     if (!running_.exchange(false)) return;
     broadcaster_.closeAll();
     server_.stop();
+    if (httpsServer_) httpsServer_->stop();
     if (keepaliveThread_.joinable()) keepaliveThread_.join();
 }
 

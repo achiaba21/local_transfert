@@ -8,6 +8,7 @@
 #include "ltr/core/logger.hpp"
 #include "ltr/web/routes/route_helpers.hpp"
 #include "ltr/web/web_service.hpp"
+#include "ltr/web/routes/multi_server.hpp"
 
 namespace ltr::web::routes {
 
@@ -37,7 +38,7 @@ std::string makeServerDeviceId() {
 } // namespace
 
 void registerAuth(WebService& svc) {
-    auto& server = svc.httpServer().raw();
+    auto server = routes::routerOf(svc);
 
     // GET /api/host-info — identité du host (public, pas d'auth).
     server.Get("/api/host-info", [&svc](const httplib::Request&,
@@ -47,6 +48,15 @@ void registerAuth(WebService& svc) {
         j["name"]            = svc.self().name;
         j["platform"]        = svc.self().platform;
         j["selfDownloadUrl"] = "/download/self";
+        res.set_header("Cache-Control", "no-store");
+        res.set_content(j.dump(), "application/json");
+    });
+
+    // V1.6.4 — Sprint Sécurité : empreinte SHA-256 du cert HTTPS.
+    server.Get("/api/cert-info", [&svc](const httplib::Request&,
+                                         httplib::Response& res) {
+        nlohmann::json j;
+        j["fingerprint"] = svc.fingerprint();
         res.set_header("Cache-Control", "no-store");
         res.set_content(j.dump(), "application/json");
     });

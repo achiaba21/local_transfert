@@ -16,6 +16,7 @@
 #include "ltr/infra/filesystem_service.hpp"
 #include "ltr/web/routes/route_helpers.hpp"
 #include "ltr/web/web_service.hpp"
+#include "ltr/web/routes/multi_server.hpp"
 
 namespace ltr::web::routes {
 
@@ -87,7 +88,7 @@ std::string sanitizeRelativePath(const std::string& raw) {
 } // namespace
 
 void registerUpload(WebService& svc) {
-    auto& server = svc.httpServer().raw();
+    auto server = routes::routerOf(svc);
 
     // ---- /api/upload-announce ----
     server.Post("/api/upload-announce", [&svc](const httplib::Request& req,

@@ -43,6 +43,12 @@ public:
     void start();
     void stop();
 
+    // V1.6.4 — Sprint Sécurité : configure le dossier de stockage du
+    // cert auto-signé. À appeler AVANT start() pour activer HTTPS.
+    void setCertConfigDir(std::filesystem::path cfgDir) {
+        certCfgDir_ = std::move(cfgDir);
+    }
+
     // Envoi host → browser. Crée N tickets et émet un SSE 'files-offer'
     // vers la session destinataire. Ne bloque pas (les downloads sont tirés
     // par le navigateur).
@@ -94,6 +100,12 @@ public:
     const std::filesystem::path& downloadDir() const { return downloadDir_; }
     const std::string&    accessPinRef() const { return accessPin_; }
 
+    // V1.6.4 — Sprint Sécurité : HTTPS coexistant + fingerprint.
+    HttpServer*           httpsServer() { return httpsServer_.get(); }
+    const std::string&    fingerprint() const { return fingerprint_; }
+    std::uint16_t         portHttps() const { return portHttps_.load(); }
+
+
 private:
     void keepaliveLoop();
     // V1.1.7 : travail lourd (zip dossier, émission SSE files-offer) exécuté
@@ -108,6 +120,13 @@ private:
     std::filesystem::path downloadDir_;
 
     HttpServer              server_;
+    // V1.6.4 — Sprint Sécurité : HTTPS server optionnel sur 45457
+    // (fallback 45458/45459 si occupé). Cert auto-signé persisté dans
+    // cfgDir.
+    std::unique_ptr<HttpServer> httpsServer_;
+    std::string             fingerprint_;
+    std::atomic<std::uint16_t> portHttps_{0};
+    std::filesystem::path   certCfgDir_;
     WebSessionStore         sessions_;
     DownloadTicketStore     tickets_;
     SseBroadcaster          broadcaster_;

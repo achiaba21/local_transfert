@@ -13,9 +13,15 @@ namespace ltr::web {
 
 // Façade cpp-httplib. Encapsule le bind+listen dans un thread dédié.
 // Les handlers sont enregistrés AVANT start().
+//
+// V1.6.4 — Sprint Sécurité : support HTTPS via constructeur secure().
+// L'instance interne devient SSLServer (héritage de Server, mêmes Get/
+// Post API).
 class HttpServer {
 public:
     HttpServer();
+    // V1.6.4 — Sprint Sécurité : constructeur HTTPS.
+    HttpServer(const std::string& certPem, const std::string& keyPem);
     ~HttpServer();
 
     HttpServer(const HttpServer&)            = delete;

@@ -13,6 +13,7 @@
 #include "ltr/core/types.hpp"
 #include "ltr/web/streaming_zip_source.hpp"
 #include "ltr/web/web_service.hpp"
+#include "ltr/web/routes/multi_server.hpp"
 #include "ltr/web/routes/route_helpers.hpp"
 
 namespace ltr::web::routes {
@@ -252,7 +253,7 @@ void streamZip(const DownloadTicket& tkt, WebService& svc,
 } // namespace
 
 void registerDownload(WebService& svc) {
-    auto& server = svc.httpServer().raw();
+    auto server = routes::routerOf(svc);
 
     server.Get(R"(/api/download/([0-9a-f]{32}))",
                [&svc](const httplib::Request& req, httplib::Response& res) {

@@ -5,11 +5,12 @@
 #include "ltr/core/logger.hpp"
 #include "ltr/web/routes/route_helpers.hpp"
 #include "ltr/web/web_service.hpp"
+#include "ltr/web/routes/multi_server.hpp"
 
 namespace ltr::web::routes {
 
 void registerLogout(WebService& svc) {
-    auto& server = svc.httpServer().raw();
+    auto server = routes::routerOf(svc);
 
     // POST /api/logout — idempotent. Invalide la session courante si cookie
     // valide, efface le cookie navigateur, répond 204.

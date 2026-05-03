@@ -106,6 +106,10 @@ void AppController::start() {
     client_    = std::make_unique<network::TransferClient>(bus_, state_.self);
     web_       = std::make_unique<web::WebService>(
         bus_, state_.self, cfg_.downloadDir, cfg_.webAnnounceTimeoutSec);
+    // V1.6.4 — Sprint Sécurité : active HTTPS via cert auto-signé
+    // persisté dans le dossier de config (~/Library/Application Support/
+    // LocalTransfer/ sur Mac).
+    web_->setCertConfigDir(infra::Config::configDir());
 
     server_->start();
     discovery_->start();

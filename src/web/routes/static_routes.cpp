@@ -6,6 +6,7 @@
 #include "ltr/core/logger.hpp"
 #include "ltr/web/routes/route_helpers.hpp"
 #include "ltr/web/web_service.hpp"
+#include "ltr/web/routes/multi_server.hpp"
 
 // Headers générés par EmbedFile.cmake au build.
 #include "ltr/web/assets/index_html.hpp"
@@ -59,7 +60,7 @@ bool isAuthed(const httplib::Request& req, WebService& svc) {
 } // namespace
 
 void registerStatic(WebService& svc) {
-    auto& server = svc.httpServer().raw();
+    auto server = routes::routerOf(svc);
 
     // GET / — page principale, protégée par cookie.
     server.Get("/", [&svc](const httplib::Request& req, httplib::Response& res) {

@@ -27,6 +27,10 @@
                             && navigator.storage
                             && navigator.storage.getDirectory);
   const FALLBACK_CAP_BYTES = 1024 * 1024 * 1024;  // 1 Go cap si Blob
+  console.log('[p2p] V1.6.3 OPFS_AVAILABLE=', OPFS_AVAILABLE,
+              ' navigator.storage=', !!navigator.storage,
+              ' getDirectory=', !!(navigator.storage
+                                    && navigator.storage.getDirectory));
 
   function transport() { return window.LTR.p2pTransport; }
   function ui()        { return window.LTR.p2pUi; }
@@ -264,6 +268,16 @@
             }
             cur.received += data.byteLength;
             state.bytesReceived += data.byteLength;
+            // Log toutes les ~50 Mo pour visualiser la progression OPFS.
+            const MILESTONE = 50 * 1024 * 1024;
+            const prevMS = Math.floor((cur.received - data.byteLength) / MILESTONE);
+            const newMS  = Math.floor(cur.received / MILESTONE);
+            if (newMS > prevMS) {
+              console.log('[p2p] receive progress', cur.name,
+                          Math.round(cur.received / 1024 / 1024) + 'MB /',
+                          Math.round(cur.size / 1024 / 1024) + 'MB',
+                          cur.opfsWritable ? '(OPFS)' : '(Blob)');
+            }
             if (ui()) ui().updateProgress(state);
           }).catch((e) =>
             clientLog('error', '[p2p] write chunk: '
@@ -289,17 +303,24 @@
       // V1.6.3 — Setup storage : OPFS si dispo, sinon Blob avec cap.
       if (OPFS_AVAILABLE) {
         cur.opfsName = `ltr-${state.peer.deviceId}-${idx}-${Date.now()}`;
+        console.log('[p2p] file-meta', idx, msg.name,
+                    '(' + msg.size + 'B) → OPFS path,',
+                    ' opfsName=', cur.opfsName);
         cur.opfsReady = (async () => {
           const root = await navigator.storage.getDirectory();
           cur.opfsHandle = await root.getFileHandle(
             cur.opfsName, { create: true });
           cur.opfsWritable = await cur.opfsHandle.createWritable();
+          console.log('[p2p] OPFS handle ready for', cur.opfsName);
         })().catch((e) => {
+          console.error('[p2p] OPFS init failed:', e);
           clientLog('error', '[p2p] OPFS init failed: ' + (e && e.message));
           cur.chunks = [];  // fallback Blob pour ce fichier
         });
       } else if (msg.size > FALLBACK_CAP_BYTES) {
         // Cap soft 1 Go en mode Blob fallback.
+        console.warn('[p2p] file >1 Go REFUSED (Blob fallback):',
+                     msg.name, msg.size, 'B');
         clientLog('warn', '[p2p] file too big for Blob fallback: '
                           + msg.size);
         if (ui()) ui().toast(
@@ -320,6 +341,8 @@
         syncFileStatus(state, fs);
         return;
       } else {
+        console.log('[p2p] file-meta', idx, msg.name,
+                    '(' + msg.size + 'B) → Blob fallback path');
         cur.chunks = [];
       }
       state.receivingFiles.push(cur);
@@ -379,10 +402,14 @@
     let blob;
     if (cur.opfsWritable) {
       // Path OPFS : ferme le writable, récupère le File handle.
+      console.log('[p2p] file-end OPFS path:', cur.name,
+                  cur.received, 'B written');
       try { await cur.opfsWritable.close(); } catch {}
       try {
         blob = await cur.opfsHandle.getFile();
+        console.log('[p2p] OPFS getFile OK,', blob.size, 'B');
       } catch (e) {
+        console.error('[p2p] OPFS getFile failed:', e);
         clientLog('error', '[p2p] OPFS getFile: ' + (e && e.message));
         if (fs) {
           fs.status = 'failed'; fs.error = 'opfs_read';
@@ -392,10 +419,13 @@
       }
     } else if (cur.chunks) {
       // Path Blob legacy : Blob construit depuis les chunks RAM.
+      console.log('[p2p] file-end Blob path:', cur.name,
+                  cur.chunks.length, 'chunks,', cur.received, 'B');
       blob = new Blob(cur.chunks, { type: cur.type });
       cur.chunks = null;
     } else {
       // Fichier qui a été marqué failed (>1 Go fallback) — skip.
+      console.warn('[p2p] file-end skipped (no chunks/handle):', cur.name);
       return;
     }
 

@@ -1,5 +1,13 @@
 include(FetchContent)
 
+# ---------- OpenSSL (V1.6.4 : HTTPS LAN + TOFU Ed25519) ----------------------
+# Cherche openssl système. Sur macOS Homebrew : /opt/homebrew/opt/openssl@3.
+# Sur Windows : OPENSSL_ROOT_DIR à passer manuellement ou via vcpkg.
+if(APPLE AND NOT OPENSSL_ROOT_DIR)
+    set(OPENSSL_ROOT_DIR "/opt/homebrew/opt/openssl@3" CACHE PATH "")
+endif()
+find_package(OpenSSL REQUIRED)
+
 # ---------- SFML 2.6 ----------------------------------------------------------
 set(SFML_BUILD_NETWORK  ON  CACHE BOOL "" FORCE)
 set(SFML_BUILD_GRAPHICS ON  CACHE BOOL "" FORCE)

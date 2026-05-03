@@ -6,6 +6,7 @@
 #include "ltr/core/logger.hpp"
 #include "ltr/web/routes/route_helpers.hpp"
 #include "ltr/web/web_service.hpp"
+#include "ltr/web/routes/multi_server.hpp"
 
 namespace ltr::web::routes {
 
@@ -22,7 +23,7 @@ bool isValidSignalType(const std::string& t) {
 } // namespace
 
 void registerP2P(WebService& svc) {
-    auto& server = svc.httpServer().raw();
+    auto server = routes::routerOf(svc);
 
     // POST /api/p2p/signal { to: "<deviceId>", type, payload }
     // - 401 : pas de cookie / session expirée
