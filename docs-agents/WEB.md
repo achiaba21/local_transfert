@@ -3,6 +3,49 @@
 > Guide central pour tout agent / session Claude qui travaille sur la
 > couche `ltr::web`. Lire avant toute modification.
 
+## 🆕 V1.5 — Sprint Hardening & Polish (partiel, 2026-05-03)
+
+Sprint multi-axes initialement prévu pour 14 items / 4 vagues.
+Livré : 5 items à risque faible (Wave 1 et Wave 2 partielles).
+Reste reporté à V1.6 (Wave 3 perf P2P + Wave 4 sécurité, avec
+chacune leur propre sprint dédié).
+
+### Livré
+
+- **`ltr::core::encodePng`** (`include/ltr/core/png_encoder.hpp`) :
+  encodeur PNG minimal réutilisable extrait de
+  `clipboard_paste_win.cpp`. IHDR + IDAT zlib via miniz + IEND.
+  ~80 LOC supprimées du fichier Windows.
+- **`ltr::core::log_event`** : log structuré avec champs k=v.
+  Toggle `LogFormat::Text` (défaut, compat) ou `Json`. Cap 200
+  chars/value pour éviter inflation. Préparation pour pipelines
+  observabilité externes.
+- **`skipFailedFile()`** dans `p2p.js` : helper qui factorise les
+  4 patterns « failed → skip → continue » du multi-fichier.
+- **Aperçu image web** (`upload.js`) : thumbnail 40×40 dans la
+  staging area si MIME image/*. URL.revokeObjectURL au cleanup.
+- **Auto-fill PIN URL** (`login.js`) : si `?pin=XXXXXX` dans
+  l'URL, pré-remplit les 6 cases. Pas d'auto-submit.
+
+### Reporté V1.6
+
+| Item | Raison report |
+|---|---|
+| 1.1 Split p2p.js (transport/session/ui) | Refactor à risque, bénéfice esthétique |
+| 2.1 desktop preview image | Cache LRU sf::Texture nécessaire |
+| 2.2 Notif natives Mac+Win | Mérite sprint dédié multi-OS |
+| 2.3bis Toggle UI QR avec PIN | UI SharePanel à designer |
+| Wave 3 entière (OPFS, multi-stream, resume P2P, re-négo) | Sprint dédié perf |
+| Wave 4 entière (HTTPS LAN, TOFU TCP) | Sprint dédié sécurité (openssl + protocole TCP) |
+
+### Tests V1.5 : 16/16 passent
+
+- `test_png_encoder` (NOUVEAU) : signature PNG, chunks IHDR/IDAT/IEND,
+  cas limites taille=0 et rgba trop petit
+- 15 tests V1.4 inchangés
+
+---
+
 ## 🆕 V1.4 — Sprint Clipboard Paste (2026-05-02)
 
 Permet d'envoyer le contenu du presse-papier (texte, image PNG,
