@@ -88,6 +88,20 @@
 
   inputs[0].focus();
 
+  // V1.5 — Sprint Hardening : si l'URL contient ?pin=XXXXXX (QR avec
+  // PIN scanné depuis la SharePanel desktop), pré-remplir les 6 cases.
+  // PAS d'auto-submit — l'utilisateur clique « Se connecter » pour
+  // garder le contrôle.
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const prefilled = (params.get('pin') || '').replace(/\D/g, '');
+    if (prefilled.length === 6) {
+      [...prefilled].forEach((c, i) => { if (inputs[i]) inputs[i].value = c; });
+      inputs[5].focus();
+      clientLog('info', 'pin pré-rempli depuis URL');
+    }
+  } catch (e) { /* ignore */ }
+
   // ---------- soumission ----------
   async function submit() {
     const pin = inputs.map((i) => i.value).join('');

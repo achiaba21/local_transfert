@@ -288,13 +288,25 @@
     const li = document.createElement('li');
     li.className = 'upload-row staging-row';
     li.dataset.stagingId = id;
+    // V1.5 — aperçu image 40×40 si MIME image/* dispo. ObjectURL
+    // révoqué au removeStaging pour libérer la RAM.
+    let thumbHtml = `<span class="f-icon">${iconFor(file.name)}</span>`;
+    let thumbUrl = null;
+    if (file.type && file.type.startsWith('image/')) {
+      try {
+        thumbUrl = URL.createObjectURL(file);
+        thumbHtml = `<img class="staging-thumb" src="${thumbUrl}"
+                          alt="" loading="lazy">`;
+      } catch (e) { /* fallback icon */ }
+    }
     li.innerHTML = `
-      <span class="f-icon">${iconFor(file.name)}</span>
+      ${thumbHtml}
       <span class="f-name">${escapeHtml(rel)}</span>
       <span class="f-size" data-role="progress">${formatBytes(file.size)}</span>
       <button type="button" class="btn btn-secondary send-to-btn">Envoyer \xC3\xA0 \u25BE</button>
       <button type="button" class="btn-ghost remove-btn" aria-label="Retirer" title="Retirer">\u2715</button>
       <div class="send-menu" hidden role="menu"></div>`;
+    if (thumbUrl) li.dataset.thumbUrl = thumbUrl;
     li.querySelector('.send-to-btn').addEventListener('click', () =>
       toggleSendMenu(id));
     li.querySelector('.remove-btn').addEventListener('click', () =>
@@ -305,6 +317,10 @@
   function removeStaging(id) {
     const e = staging.get(id);
     if (!e) return;
+    // V1.5 — libère la mémoire de la thumbnail si elle existait.
+    if (e.li && e.li.dataset.thumbUrl) {
+      try { URL.revokeObjectURL(e.li.dataset.thumbUrl); } catch (err) {}
+    }
     if (e.li && e.li.parentNode) e.li.parentNode.removeChild(e.li);
     staging.delete(id);
   }
