@@ -63,6 +63,12 @@ ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/peers.js
                PeersJs "application/javascript; charset=utf-8" peers_js)
 ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/p2p.js
                P2pJs "application/javascript; charset=utf-8" p2p_js)
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/p2p_transport.js
+               P2pTransportJs "application/javascript; charset=utf-8" p2p_transport_js)
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/p2p_session.js
+               P2pSessionJs "application/javascript; charset=utf-8" p2p_session_js)
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/p2p_ui.js
+               P2pUiJs "application/javascript; charset=utf-8" p2p_ui_js)
 ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/transfer_registry.js
                TransferRegistryJs "application/javascript; charset=utf-8" transfer_registry_js)
 ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/login.js
@@ -103,6 +109,9 @@ set(LTR_WEB_GEN_HEADERS
     ${download_js_GEN}
     ${peers_js_GEN}
     ${p2p_js_GEN}
+    ${p2p_transport_js_GEN}
+    ${p2p_session_js_GEN}
+    ${p2p_ui_js_GEN}
     ${transfer_registry_js_GEN}
     ${login_js_GEN}
     ${style_css_GEN}
