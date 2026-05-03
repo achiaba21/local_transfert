@@ -22,6 +22,11 @@
   const NO_ACK_TIMEOUT_MS   = 10_000;
   const ACK_INTERVAL_MS     = 500;
   const DRAIN_TIMEOUT_MS    = 30_000;
+  // V1.6.3 — OPFS receveur. Détection au boot + cap fallback.
+  const OPFS_AVAILABLE = !!(typeof navigator !== 'undefined'
+                            && navigator.storage
+                            && navigator.storage.getDirectory);
+  const FALLBACK_CAP_BYTES = 1024 * 1024 * 1024;  // 1 Go cap si Blob
 
   function transport() { return window.LTR.p2pTransport; }
   function ui()        { return window.LTR.p2pUi; }
@@ -235,32 +240,89 @@
       if (typeof data === 'string') {
         let msg;
         try { msg = JSON.parse(data); } catch { return; }
-        handleReceiverControl(msg, state);
+        handleReceiverControl(msg, state).catch((e) =>
+          clientLog('error', '[p2p] handleReceiverControl: '
+                    + (e && e.message)));
       } else {
+        // V1.6.3 — chunk binaire : sérialise via writeQueue pour ne
+        // pas perdre l'ordre quand OPFS write est async.
         const cur = state.receivingFiles[state.receivingFiles.length - 1];
         if (!cur) return;
-        cur.chunks.push(data);
-        cur.received += data.byteLength;
-        state.bytesReceived += data.byteLength;
-        if (ui()) ui().updateProgress(state);
         if (state.noDataWatchdog) {
           clearTimeout(state.noDataWatchdog);
           state.noDataWatchdog = null;
         }
+        cur.writeQueue = (cur.writeQueue || Promise.resolve()).then(
+          async () => {
+            if (cur.opfsReady) await cur.opfsReady;
+            if (cur.opfsWritable) {
+              await cur.opfsWritable.write({
+                type: 'write', position: cur.received, data
+              });
+            } else if (cur.chunks) {
+              cur.chunks.push(data);
+            }
+            cur.received += data.byteLength;
+            state.bytesReceived += data.byteLength;
+            if (ui()) ui().updateProgress(state);
+          }).catch((e) =>
+            clientLog('error', '[p2p] write chunk: '
+                      + (e && e.message)));
       }
     };
   }
 
-  function handleReceiverControl(msg, state) {
+  async function handleReceiverControl(msg, state) {
     if (msg.kind === 'session-meta') {
       state.totalBytes = msg.totalBytes || 0;
       state.startedAt = Date.now();
     } else if (msg.kind === 'file-meta') {
       const idx = state.fileStatuses.length;
-      state.receivingFiles.push({
+      const cur = {
         name: msg.name, size: msg.size, type: msg.type,
-        received: 0, chunks: [],
-      });
+        received: 0,
+        // OPFS-or-Blob — décidé selon capability et taille.
+        chunks: null, opfsHandle: null, opfsWritable: null,
+        opfsName: null, opfsReady: null,
+        writeQueue: Promise.resolve(),
+      };
+      // V1.6.3 — Setup storage : OPFS si dispo, sinon Blob avec cap.
+      if (OPFS_AVAILABLE) {
+        cur.opfsName = `ltr-${state.peer.deviceId}-${idx}-${Date.now()}`;
+        cur.opfsReady = (async () => {
+          const root = await navigator.storage.getDirectory();
+          cur.opfsHandle = await root.getFileHandle(
+            cur.opfsName, { create: true });
+          cur.opfsWritable = await cur.opfsHandle.createWritable();
+        })().catch((e) => {
+          clientLog('error', '[p2p] OPFS init failed: ' + (e && e.message));
+          cur.chunks = [];  // fallback Blob pour ce fichier
+        });
+      } else if (msg.size > FALLBACK_CAP_BYTES) {
+        // Cap soft 1 Go en mode Blob fallback.
+        clientLog('warn', '[p2p] file too big for Blob fallback: '
+                          + msg.size);
+        if (ui()) ui().toast(
+          `${msg.name} >1 Go : utilise un navigateur récent`, 'warning');
+        const fs = {
+          idx, name: msg.name, size: msg.size,
+          status: 'failed', bytes: 0, error: 'taille_navigateur',
+          entryId: null,
+        };
+        if (window.LTR.transferRegistry) {
+          fs.entryId = window.LTR.transferRegistry.addEntry({
+            direction: 'in', peer: state.peer,
+            name: msg.name, size: msg.size,
+          });
+        }
+        state.fileStatuses.push(fs);
+        state.receivingFiles.push(cur);  // entry vide pour l'index
+        syncFileStatus(state, fs);
+        return;
+      } else {
+        cur.chunks = [];
+      }
+      state.receivingFiles.push(cur);
       const fs = {
         idx, name: msg.name, size: msg.size,
         status: 'sending', bytes: 0, error: null, entryId: null,
@@ -276,7 +338,7 @@
       state.fileStatuses.push(fs);
       syncFileStatus(state, fs);
     } else if (msg.kind === 'file-end') {
-      finalizeReceivedFile(state);
+      await finalizeReceivedFile(state);
     } else if (msg.kind === 'all-done') {
       state.allDoneSeen = true;
       if (state.uiCard) {
@@ -286,10 +348,16 @@
     }
   }
 
-  function finalizeReceivedFile(state) {
+  async function finalizeReceivedFile(state) {
     const cur = state.receivingFiles[state.receivingFiles.length - 1];
     if (!cur) return;
     const fs = state.fileStatuses[state.fileStatuses.length - 1];
+
+    // V1.6.3 — Attendre que la write queue OPFS soit drainée AVANT
+    // de comparer received vs size.
+    if (cur.writeQueue) {
+      try { await cur.writeQueue; } catch {}
+    }
     if (cur.size && cur.received !== cur.size) {
       clientLog('warn', '[p2p] file truncated: ' + cur.name
                        + ' received=' + cur.received + ' expected=' + cur.size);
@@ -297,19 +365,59 @@
         fs.status = 'failed'; fs.error = 'taille_invalide';
         syncFileStatus(state, fs);
       }
-      cur.chunks = [];
+      // Cleanup partial : supprime opfsHandle s'il existe.
+      if (cur.opfsName) {
+        try {
+          const root = await navigator.storage.getDirectory();
+          await root.removeEntry(cur.opfsName);
+        } catch {}
+      }
+      cur.chunks = null;
       return;
     }
-    const blob = new Blob(cur.chunks, { type: cur.type });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
+
+    let blob;
+    if (cur.opfsWritable) {
+      // Path OPFS : ferme le writable, récupère le File handle.
+      try { await cur.opfsWritable.close(); } catch {}
+      try {
+        blob = await cur.opfsHandle.getFile();
+      } catch (e) {
+        clientLog('error', '[p2p] OPFS getFile: ' + (e && e.message));
+        if (fs) {
+          fs.status = 'failed'; fs.error = 'opfs_read';
+          syncFileStatus(state, fs);
+        }
+        return;
+      }
+    } else if (cur.chunks) {
+      // Path Blob legacy : Blob construit depuis les chunks RAM.
+      blob = new Blob(cur.chunks, { type: cur.type });
+      cur.chunks = null;
+    } else {
+      // Fichier qui a été marqué failed (>1 Go fallback) — skip.
+      return;
+    }
+
+    const url = URL.createObjectURL(blob);
+    const a   = document.createElement('a');
     a.href = url;
     a.download = cur.name || 'download';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 2000);
-    cur.chunks = [];
+
+    // Cleanup OPFS handle après download.
+    if (cur.opfsName) {
+      setTimeout(async () => {
+        try {
+          const root = await navigator.storage.getDirectory();
+          await root.removeEntry(cur.opfsName);
+        } catch {}
+      }, 5000);
+    }
+
     if (fs) {
       fs.status = 'received';
       fs.bytes = cur.received;
