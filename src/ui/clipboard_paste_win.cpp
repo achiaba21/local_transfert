@@ -11,9 +11,8 @@
 #include <thread>
 #include <chrono>
 
-#include <miniz.h>
-
 #include "ltr/core/logger.hpp"
+#include "ltr/core/png_encoder.hpp"
 
 namespace ltr::ui {
 
@@ -39,84 +38,8 @@ std::string utf16ToUtf8(const wchar_t* w) {
     return out;
 }
 
-// Encodeur PNG minimal : prend RGBA 8-bit width×height, retourne les
-// octets PNG (IHDR + IDAT zlib + IEND). Utilise miniz pour le deflate.
-// width/height sont les dimensions, pixels = scanlines bottom-up DIB
-// converties en top-down RGBA.
-std::vector<std::uint8_t> encodePng(std::uint32_t w, std::uint32_t h,
-                                     const std::vector<std::uint8_t>& rgba) {
-    std::vector<std::uint8_t> out;
-    auto put32 = [&](std::uint32_t v) {
-        out.push_back(static_cast<std::uint8_t>(v >> 24));
-        out.push_back(static_cast<std::uint8_t>(v >> 16));
-        out.push_back(static_cast<std::uint8_t>(v >> 8));
-        out.push_back(static_cast<std::uint8_t>(v));
-    };
-    auto putBytes = [&](const std::uint8_t* p, std::size_t n) {
-        out.insert(out.end(), p, p + n);
-    };
-    auto crc32_buf = [](const std::uint8_t* data, std::size_t len,
-                         std::uint32_t crc = 0) {
-        return mz_crc32(crc, data, len);
-    };
-    auto putChunk = [&](const char tag[5],
-                         const std::vector<std::uint8_t>& data) {
-        put32(static_cast<std::uint32_t>(data.size()));
-        const std::size_t crcStart = out.size();
-        out.insert(out.end(), tag, tag + 4);
-        if (!data.empty()) putBytes(data.data(), data.size());
-        const auto crc = crc32_buf(out.data() + crcStart,
-                                    out.size() - crcStart);
-        put32(static_cast<std::uint32_t>(crc));
-    };
-
-    // Signature PNG.
-    static const std::uint8_t kSig[8] = {
-        137, 80, 78, 71, 13, 10, 26, 10};
-    putBytes(kSig, 8);
-
-    // IHDR : 13 octets.
-    std::vector<std::uint8_t> ihdr;
-    auto put32v = [&](std::uint32_t v) {
-        ihdr.push_back(static_cast<std::uint8_t>(v >> 24));
-        ihdr.push_back(static_cast<std::uint8_t>(v >> 16));
-        ihdr.push_back(static_cast<std::uint8_t>(v >> 8));
-        ihdr.push_back(static_cast<std::uint8_t>(v));
-    };
-    put32v(w);
-    put32v(h);
-    ihdr.push_back(8);  // bit depth
-    ihdr.push_back(6);  // color type RGBA
-    ihdr.push_back(0);  // compression
-    ihdr.push_back(0);  // filter
-    ihdr.push_back(0);  // interlace
-    putChunk("IHDR", ihdr);
-
-    // Filtré = 0 (None) en début de chaque scanline.
-    std::vector<std::uint8_t> filtered;
-    filtered.reserve(h * (1 + w * 4));
-    for (std::uint32_t y = 0; y < h; ++y) {
-        filtered.push_back(0);
-        const std::uint8_t* row = rgba.data() + y * w * 4;
-        filtered.insert(filtered.end(), row, row + w * 4);
-    }
-
-    // Compression deflate (zlib) via miniz.
-    mz_ulong destLen = mz_compressBound(static_cast<mz_ulong>(filtered.size()));
-    std::vector<std::uint8_t> compressed(destLen);
-    if (mz_compress2(compressed.data(), &destLen,
-                     filtered.data(),
-                     static_cast<mz_ulong>(filtered.size()),
-                     MZ_DEFAULT_COMPRESSION) != MZ_OK) {
-        return {};
-    }
-    compressed.resize(destLen);
-    putChunk("IDAT", compressed);
-
-    // IEND.
-    putChunk("IEND", {});
-    return out;
-}
+// V1.5 — l'encodeur PNG est extrait dans core::encodePng (réutilisable).
+// On ne garde ici que la conversion DIB → RGBA top-down.
 
 // Convertit un BITMAPINFO + bits DIB en PNG. Gère 24 bits BGR et
 // 32 bits BGRA. Pour les autres profondeurs, retourne vide.
@@ -150,8 +73,8 @@ std::vector<std::uint8_t> dibToPng(const BITMAPINFO* bmi, const void* bits) {
             dstRow[x * 4 + 3] = (bpp == 4) ? p[3] : 255;    // A
         }
     }
-    return encodePng(static_cast<std::uint32_t>(width),
-                     static_cast<std::uint32_t>(height), rgba);
+    return ltr::core::encodePng(static_cast<std::uint32_t>(width),
+                                 static_cast<std::uint32_t>(height), rgba);
 }
 
 } // namespace

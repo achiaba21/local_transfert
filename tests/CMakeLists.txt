@@ -37,6 +37,11 @@ add_executable(test_clipboard_stub test_clipboard_stub.cpp)
 target_link_libraries(test_clipboard_stub PRIVATE ltr_ui)
 add_test(NAME clipboard_stub COMMAND test_clipboard_stub)
 
+# V1.5 — Sprint Hardening : encodeur PNG extrait dans core.
+add_executable(test_png_encoder test_png_encoder.cpp)
+target_link_libraries(test_png_encoder PRIVATE ltr_core)
+add_test(NAME png_encoder COMMAND test_png_encoder)
+
 add_executable(test_download_ticket test_download_ticket.cpp)
 target_link_libraries(test_download_ticket PRIVATE ltr_core)
 add_test(NAME download_ticket COMMAND test_download_ticket)

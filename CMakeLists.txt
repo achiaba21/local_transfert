@@ -134,6 +134,7 @@ add_library(ltr_core STATIC
     src/core/event_bus.cpp
     src/core/format.cpp
     src/core/logger.cpp
+    src/core/png_encoder.cpp
     src/core/shell_open.cpp
     src/domain/transfer_session.cpp
     src/network/protocol.cpp

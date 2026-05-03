@@ -404,6 +404,17 @@
     }
   }
 
+  // V1.5 — Sprint Hardening : helper pour réduire la duplication
+  // « failed → skip → continue » dupliquée 4 fois dans sendNextFile.
+  function skipFailedFile(state, fs, errorTag) {
+    fs.status = 'failed';
+    fs.error = errorTag;
+    syncFileStatus(state, fs);
+    state.currentFileIdx += 1;
+    sendNextFile(state).catch((e) =>
+      clientLog('error', '[p2p] sendNextFile rec: ' + (e && e.message)));
+  }
+
   // V1.3 — Lot 2 : helper pour propager les changements de status au
   // Registry (qui maintient la liste UI persistante).
   function syncFileStatus(state, fs) {
@@ -468,11 +479,7 @@
       idx:  state.currentFileIdx,
     };
     if (!await safeSend(state, JSON.stringify(meta), 'file-meta')) {
-      fs.status = 'failed'; fs.error = 'meta';
-      syncFileStatus(state, fs);
-      state.currentFileIdx += 1;
-      sendNextFile(state).catch((e) =>
-        clientLog('error', '[p2p] sendNextFile rec: ' + (e && e.message)));
+      skipFailedFile(state, fs, 'meta');
       return;
     }
 
@@ -503,28 +510,19 @@
       }
     } catch (e) {
       clientLog('error', '[p2p] read failed: ' + (e && e.message));
-      fs.status = 'failed'; fs.error = 'read';
-      syncFileStatus(state, fs);
-      state.currentFileIdx += 1;
-      sendNextFile(state).catch(() => {});
+      skipFailedFile(state, fs, 'read');
       return;
     }
 
     if (aborted) {
-      fs.status = 'failed'; fs.error = 'send';
-      syncFileStatus(state, fs);
-      state.currentFileIdx += 1;
-      sendNextFile(state).catch(() => {});
+      skipFailedFile(state, fs, 'send');
       return;
     }
 
     await awaitDrain(state.dc);
     if (!await safeSend(state, JSON.stringify({
         kind: 'file-end', idx: state.currentFileIdx }), 'file-end')) {
-      fs.status = 'failed'; fs.error = 'end';
-      syncFileStatus(state, fs);
-      state.currentFileIdx += 1;
-      sendNextFile(state).catch(() => {});
+      skipFailedFile(state, fs, 'end');
       return;
     }
     fs.status = 'sent';
