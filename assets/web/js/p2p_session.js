@@ -165,7 +165,12 @@
   function skipFailedFile(state, fs, errorTag) {
     fs.status = 'failed';
     fs.error = errorTag;
+    state.bundleFailed = state.bundleFailed || !!state.bundleEntryId;
     syncFileStatus(state, fs);
+    updateBundleEntry(state, 'failed', {
+      error: errorTag,
+      phase: 'failed',
+    });
     state.currentFileIdx += 1;
     sendNextFile(state).catch((e) =>
       clientLog('error', '[p2p] sendNextFile rec: ' + (e && e.message)));
@@ -186,6 +191,19 @@
         state.role === 'sender' ? 'out' : 'in',
         fs.name, state.peer.displayName);
     }
+  }
+
+  function updateBundleEntry(state, status, patch) {
+    if (!state || !state.bundleEntryId || !window.LTR.transferRegistry) return;
+    const bytes = state.role === 'sender'
+      ? state.bytesSent
+      : state.bytesReceived;
+    window.LTR.transferRegistry.updateEntry(state.bundleEntryId, Object.assign({
+      status,
+      bytes,
+      phase: status === 'sending' ? 'sending' : 'done',
+      error: null,
+    }, patch || {}));
   }
 
   function wireSenderDc(dc, state) {
@@ -301,6 +319,9 @@
         sessionId: state.sessionId,
         count: state.files.length,
         totalBytes: state.totalBytes,
+        bundleKind: state.bundle && state.bundle.kind,
+        bundleName: state.bundle && state.bundle.name,
+        bundleFileCount: state.bundle && state.bundle.fileCount,
       };
       if (!await safeSend(state, JSON.stringify(summary), 'session-meta')) {
         fs.status = 'failed'; fs.error = 'session-meta';
@@ -315,6 +336,7 @@
       name: file.name,
       size: file.size,
       type: file.type || 'application/octet-stream',
+      relativePath: file.webkitRelativePath || file.name,
       idx:  state.currentFileIdx,
       fileId: state.sessionId + ':' + state.currentFileIdx,
       stableFileId: stableFileId(file),
@@ -378,6 +400,7 @@
           if (!fs.lastRegistryAt || now - fs.lastRegistryAt > 500) {
             fs.lastRegistryAt = now;
             syncFileStatus(state, fs);
+            updateBundleEntry(state, 'sending');
           }
           pos = end;
           if (ui()) ui().updateProgress(state);
@@ -407,6 +430,21 @@
     fs.status = 'sent';
     fs.bytes = fs.size;
     syncFileStatus(state, fs);
+    if (state.bundleEntryId && state.currentFileIdx >= state.files.length - 1
+        && !state.bundleFailed) {
+      updateBundleEntry(state, 'sent', {
+        bytes: state.totalBytes,
+        phase: 'done',
+      });
+      if (window.LTR.transferRegistry && state.peer) {
+        window.LTR.transferRegistry.notifyComplete(
+          'out',
+          state.bundle ? state.bundle.name : fs.name,
+          state.peer.displayName);
+      }
+    } else {
+      updateBundleEntry(state, 'sending');
+    }
     state.currentFileIdx += 1;
     sendNextFile(state).catch((e) =>
       clientLog('error', '[p2p] sendNextFile rec: ' + (e && e.message)));
@@ -487,6 +525,7 @@
               if (!cur.lastRegistryAt || now - cur.lastRegistryAt > 500) {
                 cur.lastRegistryAt = now;
                 syncFileStatus(state, fs);
+                updateBundleEntry(state, 'sending');
               }
             }
             // Log toutes les ~50 Mo pour visualiser la progression OPFS.
@@ -523,7 +562,22 @@
       state.sessionId = msg.sessionId;
       state.expectedFileCount = msg.count;
       state.totalBytes = msg.totalBytes || 0;
+      state.bundle = msg.bundleKind === 'folder' ? {
+        kind: 'folder',
+        name: msg.bundleName || 'dossier',
+        fileCount: msg.bundleFileCount || msg.count,
+      } : null;
       state.startedAt = Date.now();
+      if (state.bundle && window.LTR.transferRegistry) {
+        state.bundleEntryId = window.LTR.transferRegistry.addEntry({
+          direction: 'in',
+          peer: state.peer,
+          name: state.bundle.name,
+          size: state.totalBytes,
+          kind: 'folder',
+          fileCount: state.bundle.fileCount,
+        });
+      }
       setSessionUiState(state, 'Vérification espace…');
     } else if (msg.kind === 'file-meta') {
       const idx = state.fileStatuses.length;
@@ -538,7 +592,8 @@
       const resume = await findResumeCandidate(state, msg);
       const cur = {
         idx, fileId: msg.fileId, stableFileId: msg.stableFileId || '',
-        name: msg.name, size: msg.size, type: msg.type,
+        name: msg.name, relativePath: msg.relativePath || msg.name,
+        size: msg.size, type: msg.type,
         received: resume ? resume.bytesWritten : 0,
         // OPFS-or-Blob — décidé selon capability et taille.
         chunks: null, opfsHandle: null, opfsWritable: null,
@@ -601,7 +656,7 @@
           ? Math.floor((cur.received / Math.max(1, cur.size)) * 100)
           : 0,
       };
-      if (window.LTR.transferRegistry) {
+      if (window.LTR.transferRegistry && !state.bundleEntryId) {
         fs.entryId = window.LTR.transferRegistry.addEntry({
           direction: 'in',
           peer: state.peer,
@@ -611,6 +666,7 @@
       }
       state.fileStatuses.push(fs);
       syncFileStatus(state, fs);
+      updateBundleEntry(state, 'sending');
       setSessionUiState(state, cur.received > 0
         ? 'Reprise réception à ' + fs.resumePct + ' %'
         : 'Écriture disque…');
@@ -624,10 +680,148 @@
         return;
       }
       state.allDoneSeen = true;
+      if (state.bundle) {
+        try {
+          await downloadReceivedFolderZip(state);
+          updateBundleEntry(state, 'received', {
+            bytes: state.totalBytes,
+            phase: 'done',
+          });
+          if (window.LTR.transferRegistry && state.peer) {
+            window.LTR.transferRegistry.notifyComplete(
+              'in', state.bundle.name, state.peer.displayName);
+          }
+        } catch (e) {
+          clientLog('error', '[p2p] folder zip failed: ' + (e && e.message));
+          updateBundleEntry(state, 'failed', {
+            error: 'zip_failed',
+            phase: 'failed',
+          });
+        }
+      }
       if (state.uiCard) {
         const sub = state.uiCard.querySelector('.peer-sub');
         if (sub) sub.textContent = '✓ Reçu';
       }
+    }
+  }
+
+  const ZIP_ENCODER = new TextEncoder();
+  let ZIP_CRC_TABLE = null;
+
+  function zipU16(n) {
+    const b = new Uint8Array(2);
+    b[0] = n & 0xff; b[1] = (n >>> 8) & 0xff;
+    return b;
+  }
+
+  function zipU32(n) {
+    const b = new Uint8Array(4);
+    b[0] = n & 0xff; b[1] = (n >>> 8) & 0xff;
+    b[2] = (n >>> 16) & 0xff; b[3] = (n >>> 24) & 0xff;
+    return b;
+  }
+
+  function crcTable() {
+    if (ZIP_CRC_TABLE) return ZIP_CRC_TABLE;
+    ZIP_CRC_TABLE = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+      let c = i;
+      for (let k = 0; k < 8; k++) {
+        c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+      }
+      ZIP_CRC_TABLE[i] = c >>> 0;
+    }
+    return ZIP_CRC_TABLE;
+  }
+
+  async function crc32Blob(blob) {
+    const table = crcTable();
+    let crc = 0xffffffff;
+    const reader = blob.stream().getReader();
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      for (let i = 0; i < value.length; i++) {
+        crc = table[(crc ^ value[i]) & 0xff] ^ (crc >>> 8);
+      }
+    }
+    return (crc ^ 0xffffffff) >>> 0;
+  }
+
+  function zipPath(name) {
+    return String(name || 'fichier')
+      .replace(/\\/g, '/')
+      .replace(/^\/+/, '')
+      .split('/')
+      .filter((part) => part && part !== '.' && part !== '..')
+      .join('/') || 'fichier';
+  }
+
+  async function makeZipBlob(files) {
+    const parts = [];
+    const central = [];
+    let offset = 0;
+    for (const item of files) {
+      if (item.blob.size > 0xffffffff) {
+        throw new Error('zip32_file_too_large');
+      }
+      const nameBytes = ZIP_ENCODER.encode(zipPath(item.name));
+      const crc = await crc32Blob(item.blob);
+      const local = [
+        zipU32(0x04034b50), zipU16(20), zipU16(0x0800), zipU16(0),
+        zipU16(0), zipU16(0), zipU32(crc),
+        zipU32(item.blob.size), zipU32(item.blob.size),
+        zipU16(nameBytes.length), zipU16(0), nameBytes,
+      ];
+      parts.push(...local, item.blob);
+      const localSize = local.reduce((sum, p) => sum + p.length, 0)
+        + item.blob.size;
+      central.push(...[
+        zipU32(0x02014b50), zipU16(20), zipU16(20), zipU16(0x0800),
+        zipU16(0), zipU16(0), zipU16(0), zipU32(crc),
+        zipU32(item.blob.size), zipU32(item.blob.size),
+        zipU16(nameBytes.length), zipU16(0), zipU16(0), zipU16(0),
+        zipU16(0), zipU32(0), zipU32(offset), nameBytes,
+      ]);
+      offset += localSize;
+    }
+    const centralSize = central.reduce((sum, p) => sum + p.length, 0);
+    if (offset > 0xffffffff || centralSize > 0xffffffff) {
+      throw new Error('zip32_too_large');
+    }
+    parts.push(...central);
+    parts.push(
+      zipU32(0x06054b50), zipU16(0), zipU16(0),
+      zipU16(files.length), zipU16(files.length),
+      zipU32(centralSize), zipU32(offset), zipU16(0));
+    return new Blob(parts, { type: 'application/zip' });
+  }
+
+  async function downloadReceivedFolderZip(state) {
+    const files = state.bundleFiles || [];
+    if (files.length === 0) return;
+    setSessionUiState(state, 'Création ZIP…');
+    const zip = await makeZipBlob(files);
+    const url = URL.createObjectURL(zip);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (state.bundle.name || 'dossier') + '.zip';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    if (OPFS_AVAILABLE) {
+      setTimeout(async () => {
+        try {
+          const root = await navigator.storage.getDirectory();
+          for (const item of files) {
+            if (item.opfsName) {
+              try { await root.removeEntry(item.opfsName); } catch {}
+            }
+          }
+        } catch {}
+      }, 5000);
     }
   }
 
@@ -697,17 +891,26 @@
       return;
     }
 
-    const url = URL.createObjectURL(blob);
-    const a   = document.createElement('a');
-    a.href = url;
-    a.download = cur.name || 'download';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    if (state.bundle) {
+      state.bundleFiles = state.bundleFiles || [];
+      state.bundleFiles.push({
+        name: cur.relativePath || cur.name || 'download',
+        blob,
+        opfsName: cur.opfsName,
+      });
+    } else {
+      const url = URL.createObjectURL(blob);
+      const a   = document.createElement('a');
+      a.href = url;
+      a.download = cur.name || 'download';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }
 
     // Cleanup OPFS handle après download.
-    if (cur.opfsName) {
+    if (cur.opfsName && !state.bundle) {
       setTimeout(async () => {
         try {
           const root = await navigator.storage.getDirectory();
@@ -836,12 +1039,17 @@
   function failOpenFileStatuses(state, label) {
     if (!state || !state.fileStatuses) return;
     const error = cleanupError(label);
+    state.bundleFailed = state.bundleFailed || !!state.bundleEntryId;
     for (const fs of state.fileStatuses) {
       if (fs.status !== 'pending' && fs.status !== 'sending') continue;
       fs.status = 'failed';
       fs.error = error;
       syncFileStatus(state, fs);
     }
+    updateBundleEntry(state, 'failed', {
+      error,
+      phase: 'failed',
+    });
   }
 
   // V1.6.5 — Wave 2 item E : helpers de persistance du sidecar IndexedDB.
@@ -861,6 +1069,7 @@
       },
       fileMeta: {
         name: cur.name,
+        relativePath: cur.relativePath || cur.name,
         size: cur.size,
         type: cur.type,
         stableFileId: cur.stableFileId || '',

@@ -42,6 +42,7 @@
       role: 'sender',
       peer,
       files,
+      bundle: opts.bundle || null,
       pc: null,
       dc: null,
       currentFileIdx: 0,
@@ -59,7 +60,23 @@
       })),
     };
     if (window.LTR.transferRegistry) {
-      files.forEach((f, i) => {
+      if (state.bundle && state.bundle.kind === 'folder') {
+        state.bundleEntryId = opts.entryIds && opts.entryIds[0];
+        if (state.bundleEntryId) {
+          window.LTR.transferRegistry.attachFiles(state.bundleEntryId, files);
+        } else {
+          state.bundleEntryId = window.LTR.transferRegistry.addEntry({
+            direction: 'out',
+            peer,
+            name: state.bundle.name,
+            size: state.totalBytes,
+            kind: 'folder',
+            fileCount: files.length,
+            files,
+          });
+        }
+      } else {
+        files.forEach((f, i) => {
         let id = opts.entryIds && opts.entryIds[i];
         if (!id) {
           id = window.LTR.transferRegistry.addEntry({
@@ -70,7 +87,8 @@
           window.LTR.transferRegistry.attachFile(id, f);
         }
         state.fileStatuses[i].entryId = id;
-      });
+        });
+      }
     }
     T.conns.set(T.connKey(deviceId, 'sender'), state);
     state.uiCard = U.markCardSending(deviceId, 'waiting');

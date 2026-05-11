@@ -42,12 +42,34 @@
   <p class="meta">
     tranfert_local · Projet C++17 / SFML
   </p>
-  <p class="meta">Dernière mise à jour 2026-04-22</p>
+  <p class="meta">Dernière mise à jour 2026-05-05</p>
 </header>
 
 <h2>Features livrées</h2>
 
 <ul class="feature-list">
+  <li>
+    <a href="stability-sessions-history-v1-6-5.html">🛡️ V1.6.5 — Stabilité, Sessions, Historique</a>
+    <p>
+      4 vagues correctives suite à l'audit utilisateur post-V1.6.4 :
+      bug « bloqué à 0% » HTTP/P2P, Range Requests RFC 7233, retry upload
+      client-side avec backoff exp, iceRestart auto P2P, sidecar IndexedDB
+      pour récupérer les transferts P2P interrompus, cookie persistent HMAC
+      30j (sessions résilientes sans re-PIN), mémorisation PIN AES-GCM
+      WebCrypto, historique persistant des pairs (peers_history.json) et
+      des transferts (transfer_history.json) côté host, TOFU P2P avec
+      vérification fingerprint DTLS et toast bloquant.
+    </p>
+    <div class="tags">
+      <span class="tag">HMAC SHA-256</span>
+      <span class="tag">WebCrypto AES-GCM</span>
+      <span class="tag">IndexedDB</span>
+      <span class="tag">Range Requests</span>
+      <span class="tag">iceRestart</span>
+      <span class="tag">TOFU P2P</span>
+      <span class="tag ok">v1.6.5 · audit 80 · 21/21 tests</span>
+    </div>
+  </li>
   <li>
     <a href="local-file-transfer.html">📡 LocalTransfer (noyau)</a>
     <p>

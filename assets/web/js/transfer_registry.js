@@ -30,7 +30,7 @@
   // Map en mémoire des File originaux (sender uniquement) — perdus au
   // refresh, donc retry après refresh = impossible (toast invitera à
   // re-sélectionner).
-  const originalFiles = new Map();  // entryId → File
+  const originalFiles = new Map();  // entryId -> File | File[]
 
   function makeId() {
     return 'tx-' + Date.now().toString(36)
@@ -216,6 +216,8 @@
       peerEmoji:     opts.peer.emoji,
       name:          opts.name,
       size:          opts.size,
+      kind:          opts.kind || 'file',
+      fileCount:     opts.fileCount || 1,
       status:        'pending',
       phase:         'queued',
       resumePct:     0,
@@ -225,7 +227,8 @@
       finishedAt:    null,
     };
     entries.push(entry);
-    if (opts.file) originalFiles.set(id, opts.file);
+    if (opts.files) originalFiles.set(id, opts.files);
+    else if (opts.file) originalFiles.set(id, opts.file);
     saveToStorage();
     render();
     return id;
@@ -250,11 +253,13 @@
   function retryFile(id) {
     const e = entries.find((x) => x.id === id);
     if (!e || e.direction !== 'out' || e.status !== 'failed') return;
-    const file = originalFiles.get(id);
-    if (!file) {
+    const stored = originalFiles.get(id);
+    if (!stored) {
       if (window.LTR.p2p && window.LTR.p2p.toast) {
         window.LTR.p2p.toast(
-          'Sélectionne à nouveau ce fichier (perdu après refresh)',
+          e.kind === 'folder'
+            ? 'Sélectionne à nouveau ce dossier (perdu après refresh)'
+            : 'Sélectionne à nouveau ce fichier (perdu après refresh)',
           'warning');
       }
       return;
@@ -276,7 +281,19 @@
       resumePct: 0,
       finishedAt: null,
     });
-    window.LTR.p2p.startSendTo(peer, [file], { entryIds: [id] });
+    if (e.kind === 'folder' && Array.isArray(stored)) {
+      window.LTR.p2p.startSendTo(peer, stored, {
+        entryIds: [id],
+        bundle: {
+          kind: 'folder',
+          name: e.name,
+          fileCount: stored.length,
+          totalSize: e.size,
+        },
+      });
+    } else {
+      window.LTR.p2p.startSendTo(peer, [stored], { entryIds: [id] });
+    }
   }
 
   function clearAll() {
@@ -297,6 +314,10 @@
   // retry. Appelée par p2p.js après addEntry.
   function attachFile(id, file) {
     if (id && file) originalFiles.set(id, file);
+  }
+
+  function attachFiles(id, files) {
+    if (id && files) originalFiles.set(id, Array.from(files));
   }
 
   // ====================================================================
@@ -366,23 +387,23 @@
       const pct = e.size > 0
         ? Math.floor((e.bytes / e.size) * 100) : 0;
       icon = '<span class="p2p-icon p2p-icon-sending">↻</span>';
-      sub = `${phaseLabel(e)} · ${pct} % · ${peerStr}`;
+      sub = `${folderLabel(e)}${phaseLabel(e)} · ${pct} % · ${peerStr}`;
       progress = `<div class="p2p-entry-bar"><span style="width:${pct}%"></span></div>`;
     } else if (e.status === 'sent' || e.status === 'received') {
       icon = '<span class="p2p-icon p2p-icon-done">✓</span>';
-      sub = `${formatBytes(e.size)} · ${peerStr} · ${formatTime(e.finishedAt)}`;
+      sub = `${folderLabel(e)}${formatBytes(e.size)} · ${peerStr} · ${formatTime(e.finishedAt)}`;
     } else if (e.status === 'failed') {
       icon = '<span class="p2p-icon p2p-icon-failed">✗</span>';
-      sub = `${humanError(e.error)} · ${peerStr}`;
+      sub = `${folderLabel(e)}${humanError(e.error)} · ${peerStr}`;
     } else if (e.status === 'interrupted') {
       // V1.6.5 — Wave 2 item E : transfert P2P interrompu, partial OPFS
       // disponible pour récupération.
       const pct = e.size > 0 ? Math.floor((e.bytes / e.size) * 100) : 0;
       icon = '<span class="p2p-icon p2p-icon-failed">⏸</span>';
-      sub = `Interrompu · ${formatBytes(e.bytes)}/${formatBytes(e.size)} (${pct} %) · ${peerStr}`;
+      sub = `${folderLabel(e)}Interrompu · ${formatBytes(e.bytes)}/${formatBytes(e.size)} (${pct} %) · ${peerStr}`;
     } else {
       icon = '<span class="p2p-icon p2p-icon-pending">⏱</span>';
-      sub = `${phaseLabel(e)} · ${peerStr}`;
+      sub = `${folderLabel(e)}${phaseLabel(e)} · ${peerStr}`;
     }
     let actionBtns = '';
     if (e.status === 'failed' && e.direction === 'out') {
@@ -412,6 +433,11 @@
       </li>`;
   }
 
+  function folderLabel(entry) {
+    if (!entry || entry.kind !== 'folder') return '';
+    return `${entry.fileCount || 0} fichier${entry.fileCount > 1 ? 's' : ''} · `;
+  }
+
   function humanError(err) {
     if (!err) return 'Échec';
     const map = {
@@ -435,6 +461,7 @@
       'protocole_fichier': 'Protocole fichier invalide',
       'protocole_fin':     'Fin de session invalide',
       'protocole_file_end': 'Fin de fichier invalide',
+      'zip_failed':         'Création ZIP impossible',
     };
     return map[err] || 'Échec ' + err;
   }
@@ -518,7 +545,7 @@
 
   window.LTR = window.LTR || {};
   window.LTR.transferRegistry = {
-    init, addEntry, updateEntry, retryFile, attachFile,
+    init, addEntry, updateEntry, retryFile, attachFile, attachFiles,
     activeCount, totalCount, clearAll, render, notifyComplete,
   };
 })();

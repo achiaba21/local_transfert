@@ -46,6 +46,7 @@ std::string makeSessionId() {
 std::uint64_t lookupAnnouncedSize(const AnnounceSnapshot& snap,
                                   const std::string& filename) {
     for (const auto& f : snap.files) {
+        if (!f.relativePath.empty() && f.relativePath == filename) return f.size;
         if (f.name == filename) return f.size;
     }
     return 0;
@@ -106,8 +107,12 @@ void registerUpload(WebService& svc) {
         svc.sessions().touch(token);
 
         std::vector<AnnounceFile> files;
+        std::string bundleKind;
+        std::string bundleName;
         try {
             const auto j = nlohmann::json::parse(req.body);
+            bundleKind = j.value("bundleKind", "");
+            bundleName = j.value("bundleName", "");
             for (const auto& f : j.value("files", nlohmann::json::array())) {
                 AnnounceFile af;
                 af.name         = f.value("name", "");
@@ -138,7 +143,8 @@ void registerUpload(WebService& svc) {
         ev.totalBytes    = 0;
         for (const auto& f : files) ev.totalBytes += f.size;
         ev.filesCount    = static_cast<int>(files.size());
-        ev.firstFileName = files.front().name;
+        ev.firstFileName = (bundleKind == "folder" && !bundleName.empty())
+            ? bundleName : files.front().name;
         svc.bus().post(std::move(ev));
 
         const auto decision = svc.announces().waitForDecision(
@@ -282,7 +288,7 @@ void registerUpload(WebService& svc) {
                 std::string effectiveRel = relPathClean.empty()
                     ? basename : relPathClean;
                 state->displayName   = effectiveRel;
-                state->totalExpected = lookupAnnouncedSize(snap, basename);
+                state->totalExpected = lookupAnnouncedSize(snap, effectiveRel);
 
                 const auto destFull = targetDir / effectiveRel;
                 std::error_code ec;

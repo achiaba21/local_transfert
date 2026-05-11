@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>V1.6.5 — Stabilité, Sessions, Historique</title>
+<style>
+  :root {
+    --bg:#FAFAFB; --fg:#1a1d23; --mute:#6b7280;
+    --accent:#6366F1; --accent-hover:#4F46E5; --accent-light:#EEF2FF;
+    --warn:#F59E0B; --ok:#22C55E; --err:#EF4444;
+    --sep:#e5e7eb; --surf:#ffffff;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Helvetica,sans-serif;
+         color:var(--fg); background:var(--bg); line-height:1.6; }
+  .wrap { max-width:880px; margin:0 auto; padding:48px 28px; }
+  header { border-bottom:1px solid var(--sep); padding-bottom:20px; margin-bottom:28px; }
+  header h1 { margin:0 0 6px; font-size:30px; font-weight:700; }
+  .meta { color:var(--mute); font-size:13px; }
+  .badges { margin-top:10px; display:flex; gap:6px; flex-wrap:wrap; }
+  .b { display:inline-block; padding:3px 10px; border-radius:12px;
+       font-size:11px; font-weight:600; background:var(--accent-light);
+       color:var(--accent); }
+  .b.ok { background:#ecfdf5; color:var(--ok); }
+  h2 { margin-top:36px; padding-bottom:6px; border-bottom:1px solid var(--sep);
+       font-size:21px; font-weight:700; }
+  h3 { margin-top:24px; font-size:16px; font-weight:700; color:var(--accent); }
+  code { background:var(--accent-light); color:var(--accent);
+         padding:1px 6px; border-radius:4px; font-size:13px;
+         font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  pre { background:var(--surf); border:1px solid var(--sep);
+        border-radius:6px; padding:14px; overflow-x:auto; font-size:13px;
+        font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  pre code { background:none; color:inherit; padding:0; }
+  table { border-collapse:collapse; width:100%; margin:12px 0;
+          background:var(--surf); border:1px solid var(--sep); border-radius:6px; }
+  th, td { padding:9px 12px; text-align:left; border-bottom:1px solid var(--sep);
+           font-size:14px; }
+  th { background:var(--surf); font-weight:600; }
+  tr:last-child td { border-bottom:none; }
+  .lim { background:#FFFBEB; border-left:3px solid var(--warn);
+         padding:12px 16px; margin:12px 0; border-radius:4px; }
+  .lim strong { color:#92400E; }
+  ul.checks li { list-style:none; }
+  ul.checks li::before { content:"✓ "; color:var(--ok); font-weight:700; }
+  footer { margin-top:48px; padding-top:20px; border-top:1px solid var(--sep);
+           color:var(--mute); font-size:12px; }
+  .changelog-entry { padding:14px 16px; background:var(--surf);
+                     border:1px solid var(--sep); border-radius:6px;
+                     margin:10px 0; }
+  .changelog-entry h3 { margin-top:0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>🛡️ V1.6.5 — Stabilité, Sessions, Historique</h1>
+  <p class="meta">Sprint XL livré le 2026-05-05 · 4 vagues HTTP + P2P</p>
+  <div class="badges">
+    <span class="b ok">✅ Audit 80/100</span>
+    <span class="b ok">21/21 tests</span>
+    <span class="b">14 fichiers C++</span>
+    <span class="b">15 fichiers JS/HTML/CSS</span>
+    <span class="b">4 nouveaux tests unit</span>
+  </div>
+</header>
+
+<h2>Contexte</h2>
+<p>
+Suite à l'audit utilisateur post-V1.6.4, 5 zones d'instabilité ont été
+identifiées dans les 2 chemins de transfert web (HTTP visiteur↔host et
+P2P visiteur↔visiteur via WebRTC) :
+</p>
+<ol>
+  <li>Aucune stratégie de resume (pas de Range Request, OPFS perdu au reload, pas d'iceRestart)</li>
+  <li>Téléchargements bloqués à 0% (event progress émis trop tard)</li>
+  <li>Sessions web trop strictes (TTL 30s, cookie session pur, redémarrage host = perte totale)</li>
+  <li>PIN jamais mémorisé côté browser</li>
+  <li>Aucun historique persistant côté host</li>
+</ol>
+
+<h2>Wave 1 — Stabilité HTTP</h2>
+
+<div class="changelog-entry">
+<h3>A · Bug « bloqué à 0% »</h3>
+<p>
+<code>TransferProgressEvent</code> est désormais émis dès le début du
+handler <code>streamFile</code>/<code>streamZip</code>, <strong>avant</strong>
+<code>set_content_provider</code>. Avant le fix, l'event n'arrivait qu'au
+1<sup>er</sup> chunk lu — une coupure SSL handshake ou un browser bloqué
+sur le warning cert HTTPS laissait l'UI desktop figée à 0% sans signe de vie.
+</p>
+</div>
+
+<div class="changelog-entry">
+<h3>B · Cancel flag leak</h3>
+<p>
+<code>WebService::releaseCancelFlag(sessionId)</code> nettoie la map
+<code>cancelFlags_</code> à toutes les terminaisons du content_provider
+(cancel utilisateur, EOF normal, sink.write fail).
+</p>
+</div>
+
+<div class="changelog-entry">
+<h3>C · Resume upload (version minimale)</h3>
+<p>
+<code>upload.js</code> retry automatiquement <strong>3 fois</strong> avec
+backoff exponentiel 1s/2s/4s. Si après 3 retries l'upload échoue, un bouton
+<strong>« ↻ Reprendre »</strong> manuel apparaît dans l'UI.
+</p>
+<div class="lim">
+<strong>Limitation V1.6.5</strong> : le serveur ne supporte pas encore le
+vrai resume avec offset HTTP <code>Content-Range</code>. Chaque retry
+repart from scratch — efficace pour les coupures < 7s cumulées.
+Reporté à V1.6.6.
+</div>
+</div>
+
+<div class="changelog-entry">
+<h3>D · HTTP Range Requests (RFC 7233)</h3>
+<p>
+<code>download_routes.cpp</code> parse le header <code>Range: bytes=N-</code>,
+seek dans le fichier, retourne <code>206 Partial Content</code> avec
+<code>Content-Range</code>. Le browser fait automatiquement le retry avec
+range en cas de coupure réseau pendant un download <code>&lt;a href download&gt;</code>.
+</p>
+<p>Module <code>range_parser.{hpp,cpp}</code> avec test unit (11 cas).</p>
+</div>
+
+<h2>Wave 2 — Resume P2P</h2>
+
+<div class="changelog-entry">
+<h3>G · iceRestart automatique</h3>
+<p>
+<code>p2p_transport.js</code> monitore <code>pc.connectionState</code>.
+Si <code>disconnected</code> > 5s (avant le cleanup à 15s), le sender
+appelle <code>pc.createOffer({iceRestart:true})</code> et envoie un signal
+<code>ice-restart</code> au pair. Le receiver applique
+<code>setRemoteDescription</code> + <code>createAnswer</code> + signal
+<code>ice-restart-answer</code>. Symétrie complète.
+</p>
+<p>
+Si reconnexion < 15s : le DataChannel reprend depuis l'offset courant.
+Sinon : cleanup normal « ✗ Wi-Fi perdu ».
+</p>
+</div>
+
+<div class="changelog-entry">
+<h3>E · Sidecar IndexedDB receveur</h3>
+<p>
+Nouveau module <code>idb.js</code> (~80 lignes, API native sans dépendance)
+expose <code>window.LTR.idb</code>. À chaque ack reçu (toutes les 500ms),
+<code>p2p_session.js</code> persiste dans le store
+<code>ltr-p2p-pending</code> :
+</p>
+<pre><code>{
+  opfsName, peer, fileMeta,
+  bytesWritten, lastAckAt, startedAt
+}</code></pre>
+<p>
+Au boot d'un nouvel onglet, <code>transfer_registry.js</code> scan le
+store : pour chaque entry > 30s ancienne (donc orpheline), affiche une
+card « Interrompu (X/Y MB) » avec deux boutons :
+</p>
+<ul class="checks">
+  <li><strong>▶ Reprendre</strong> : récupère le partial OPFS via
+      <code>getFileHandle.getFile()</code> et déclenche un download Blob</li>
+  <li><strong>✕ Annuler</strong> : purge OPFS + sidecar IndexedDB</li>
+</ul>
+<div class="lim">
+<strong>Limitation V1.6.5</strong> : le « Reprendre » récupère le partial
+téléchargé, pas une vraie reprise du DataChannel (qui demanderait
+coopération du sender pour renégocier la session avec offset).
+Reporté à V1.6.7.
+</div>
+</div>
+
+<h2>Wave 3 — Sessions résilientes</h2>
+
+<div class="changelog-entry">
+<h3>H · Cookie persistent HMAC <code>ltr_remember</code></h3>
+<p>
+TTL session inactivité : <code>kWebSessionTtl</code> 30s → <strong>300s</strong> (5 min).
+Nouveau cookie persistent <code>ltr_remember</code> Max-Age 30 jours, format :
+</p>
+<pre><code>{deviceId}.{exp}.{pinHash8}.{HMAC_SHA256_HEX}</code></pre>
+<p>
+HMAC SHA-256 RFC 2104 implémenté manuellement au-dessus de picosha2
+(pas de nouvelle dépendance, conforme CLAUDE.md). Secret HMAC = fingerprint
+cert HTTPS V1.6.4 (déjà persisté dans <code>cfgDir/cert.pem</code>, stable).
+Compare HMAC <strong>constant-time</strong> dans <code>verifyPersistentToken</code>
+pour éviter les timing-attacks.
+</p>
+<p>
+Émis par <code>POST /api/auth</code> quand body contient <code>remember:true</code>
+(checkbox cochée par défaut). Endpoint NEW <code>POST /api/auth/refresh</code>
+vérifie le cookie + recrée la session sans re-PIN. Logout efface 4 entrées :
+<code>ltr_token</code>, <code>ltr_remember</code>,
+<code>ltr-pin-encrypted</code>, <code>ltr-pin-iv</code>.
+</p>
+<p>
+Test unit <code>test_persistent_token</code> (9 cas : roundtrip, PIN
+différent, secret différent, expiré, tampered, format invalide).
+</p>
+</div>
+
+<div class="changelog-entry">
+<h3>I · « Mémoriser le PIN » WebCrypto AES-GCM</h3>
+<p>
+Module <code>pin_storage.js</code> chiffre le PIN avec <strong>AES-GCM 256</strong>,
+clé dérivée via <strong>HKDF SHA-256</strong> du fingerprint cert HTTPS.
+Nécessite un secure context (HTTPS ou localhost) — la checkbox est désactivée
+en HTTP plain.
+</p>
+<p>
+À l'ouverture suivante de <code>/login</code> : si entry présente +
+fingerprint identique, le PIN est déchiffré et pré-remplit silencieusement
+les 6 cases. L'utilisateur clique simplement « Se connecter ».
+</p>
+<div class="lim">
+<strong>Placeholder V1</strong> : la clé HKDF dérive d'un secret PUBLIC
+(le fingerprint cert est exposé via <code>/api/cert-info</code>). Ne protège
+QUE contre la lecture passive du fichier localStorage par un autre user du
+même device. Pas robuste contre XSS / vol device / malware. À durcir avec
+<strong>WebAuthn</strong> ou une <code>CryptoKey</code> non-extractable
+pour V2.
+</div>
+</div>
+
+<h2>Wave 4 — Historique persistant</h2>
+
+<div class="changelog-entry">
+<h3>J · <code>peers_history.json</code> côté host</h3>
+<p>
+Nouveau module <code>infra/peers_history.{hpp,cpp}</code> sur le pattern
+<code>KnownPeers</code> V1.6.4. Stockage :
+<code>~/Library/Application Support/LocalTransfer/peers_history.json</code>
+(Mac), <code>%APPDATA%/LocalTransfer/peers_history.json</code> (Windows).
+</p>
+<p>Schéma entry :</p>
+<pre><code>{
+  deviceId, name, platform,
+  kind: "native" | "web",
+  fingerprint,
+  firstSeen, lastSeen,         // epoch seconds
+  totalTransfers, totalBytes
+}</code></pre>
+<p>
+Hooks <code>AppController::onEvent</code> :
+<code>PeerSeenEvent → touch()</code>,
+<code>TransferDoneEvent → recordTransfer(bytes)</code>.
+Purge auto > <strong>30 jours</strong> au load (décision BA).
+Méthode <code>forget(deviceId)</code> pour clic-droit « Oublier ».
+</p>
+<p>Test unit <code>test_peers_history</code> (7 cas).</p>
+</div>
+
+<div class="changelog-entry">
+<h3>K · <code>transfer_history.json</code> côté host</h3>
+<p>
+Nouveau module <code>infra/transfer_history.{hpp,cpp}</code>. Stockage :
+<code>cfgDir/transfer_history.json</code>.
+</p>
+<p>Schéma entry :</p>
+<pre><code>{
+  sessionId, peerDeviceId, peerName,
+  kind: "tcp-out" | "tcp-in" | "http-up" | "http-down",
+  fileCount, totalBytes,
+  status: "pending" | "ok" | "failed" | "cancelled",
+  startedAt, finishedAt, error
+}</code></pre>
+<p>
+<strong>Cap 1000 entries</strong> (drop des plus anciennes si dépassement).
+<strong>Auto-purge entries > 6 mois</strong> au load.
+</p>
+<p>
+Test unit <code>test_transfer_history</code> (8 cas dont cap 1000 vérifié
+à 1500 insertions).
+</p>
+<p><strong>Note</strong> : les transferts P2P browser↔browser ne sont
+<strong>pas</strong> loggés ici — le host ne voit que les signaux, pas
+les données. Seul le browser garde leur trace dans
+<code>transfer_registry.js</code> (localStorage).</p>
+</div>
+
+<div class="changelog-entry">
+<h3>L · TOFU P2P côté browser</h3>
+<p>
+À chaque offer P2P reçue, <code>p2p.js::handleIncomingOffer</code> extrait
+l'empreinte DTLS de la SDP (regex <code>a=fingerprint:sha-256 ...</code>)
+et lookup dans IndexedDB store <code>ltr-p2p-known-peers</code> :
+</p>
+<ul class="checks">
+  <li>1<sup>re</sup> fois → set silencieux (TOFU)</li>
+  <li>Match → silencieux</li>
+  <li>Mismatch → toast bloquant <code>showTofuToast</code> avec deux actions :
+      <strong>« Faire confiance »</strong> (set + accept) ou
+      <strong>« Refuser »</strong> (signal refuse + cleanup)</li>
+</ul>
+<p>Pas d'auto-dismiss : décision explicite obligatoire.</p>
+</div>
+
+<h2>Endpoints HTTP</h2>
+
+<table>
+  <tr><th>Endpoint</th><th>Méthode</th><th>Wave</th><th>Notes</th></tr>
+  <tr>
+    <td><code>/api/auth</code></td><td>POST</td><td>3</td>
+    <td>Body étendu : <code>{pin, device_id, remember}</code>. Si <code>remember:true</code> → cookie <code>ltr_remember</code>.</td>
+  </tr>
+  <tr>
+    <td><code>/api/auth/refresh</code></td><td>POST</td><td>3</td>
+    <td>NEW. Lit cookie <code>ltr_remember</code>, vérifie HMAC, recrée session.</td>
+  </tr>
+  <tr>
+    <td><code>/api/logout</code></td><td>POST</td><td>3</td>
+    <td>Efface <code>ltr_token</code> ET <code>ltr_remember</code>.</td>
+  </tr>
+  <tr>
+    <td><code>/api/download/:id</code></td><td>GET</td><td>1</td>
+    <td>Header <code>Accept-Ranges: bytes</code> toujours. Si <code>Range</code> reçu → 206 Partial Content.</td>
+  </tr>
+  <tr>
+    <td><code>/api/p2p/signal</code></td><td>POST</td><td>2</td>
+    <td>Whitelist élargie : <code>ice-restart</code>, <code>ice-restart-answer</code>.</td>
+  </tr>
+</table>
+
+<h2>Fichiers persistés</h2>
+
+<table>
+  <tr><th>Fichier</th><th>Wave</th><th>Rétention</th></tr>
+  <tr>
+    <td><code>peers_history.json</code> (host)</td><td>4</td>
+    <td>Auto-purge > 30 jours au load</td>
+  </tr>
+  <tr>
+    <td><code>transfer_history.json</code> (host)</td><td>4</td>
+    <td>Cap 1000 + auto-purge > 6 mois</td>
+  </tr>
+  <tr>
+    <td>IndexedDB <code>ltr-app/ltr-p2p-pending</code> (browser)</td><td>2</td>
+    <td>Cleanup à finalize success ou via UI « Annuler »</td>
+  </tr>
+  <tr>
+    <td>IndexedDB <code>ltr-app/ltr-p2p-known-peers</code> (browser)</td><td>4</td>
+    <td>Indéfini (manuel)</td>
+  </tr>
+  <tr>
+    <td>localStorage <code>ltr-pin-encrypted</code> + <code>.ltr-pin-iv</code> (browser)</td><td>3</td>
+    <td>Effacé au logout</td>
+  </tr>
+  <tr>
+    <td>Cookie <code>ltr_remember</code> (browser)</td><td>3</td>
+    <td>Max-Age 30 jours</td>
+  </tr>
+</table>
+
+<h2>Tests V1.6.5 ajoutés</h2>
+
+<table>
+  <tr><th>Test</th><th>Wave</th><th>Cas</th></tr>
+  <tr><td><code>test_range_parser</code></td><td>1</td><td>11 cas (Range bytes=N-, bytes=N-M, hors limites, garbage, etc.)</td></tr>
+  <tr><td><code>test_persistent_token</code></td><td>3</td><td>9 cas (roundtrip, PIN diff, secret diff, expiré, tampered, format)</td></tr>
+  <tr><td><code>test_peers_history</code></td><td>4</td><td>7 cas (touch, recordTransfer, forget, snapshotOffline, roundtrip)</td></tr>
+  <tr><td><code>test_transfer_history</code></td><td>4</td><td>8 cas (insert, markDone, cap 1000, purge, snapshot tri DESC)</td></tr>
+</table>
+
+<p><strong>Total tests projet</strong> : 21/21 ✅ (17 V1.6.4 + 4 nouveaux V1.6.5).</p>
+
+<h2>Reportés à V1.6.6 / V1.6.7</h2>
+
+<div class="lim">
+<strong>UI desktop SFML reportée</strong> :
+<ul>
+  <li>Vue « Historique » pleine page (Surface 3.A) — données accessibles via <code>controller_.transferHistory()->snapshot()</code></li>
+  <li>Sidebar « Récents (offline) » repliable (Surface 4.B) — données accessibles via <code>controller_.peersHistory()->snapshotOffline(...)</code></li>
+</ul>
+</div>
+
+<div class="lim">
+<strong>Resume HTTP serveur (chunked + offset)</strong> :
+le retry client-side V1.6.5 couvre les coupures brèves ; le vrai resume
+avec persistence <code>.partial</code> serveur-side est reporté à V1.6.6.
+</div>
+
+<div class="lim">
+<strong>Resume P2P sender</strong> (renégocier session avec sender) :
+demande coopération du peer original. Reporté à V1.6.7.
+</div>
+
+<div class="lim">
+<strong>Hook <code>handle401Async</code> dans modules</strong> :
+<code>tryRefreshSession</code> + <code>handle401Async</code> sont exposés
+par <code>common.js</code> mais <code>upload.js</code>/<code>download.js</code>/
+<code>p2p_transport.js</code> ne les invoquent pas encore. Câblage simple
+à faire dans V1.6.6.
+</div>
+
+<h2>Liens</h2>
+
+<ul>
+  <li><a href="index.html">← Index documentation</a></li>
+  <li><a href="web-interface.html">🌐 Interface Web (V1.0 + historique sprints)</a></li>
+  <li><a href="local-file-transfer.html">📡 LocalTransfer (noyau V1.0)</a></li>
+</ul>
+
+<footer>
+  Sprint V1.6.5 livré le 2026-05-05 · pipeline multi-agents
+  (Business Analyst → Architecture → UI/UX → Dev → Audit → Doc).
+</footer>
+
+</div>
+</body>
+</html>

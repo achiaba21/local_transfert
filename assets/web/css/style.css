@@ -356,20 +356,36 @@ body.page-main {
   font-size: var(--fs-h1);
   font-weight: 700;
   margin: 0;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
 }
 .host-pill {
   margin-left: auto;
-  padding: 4px var(--sp-md);
-  background: var(--accent-light);
-  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  min-width: 0;
+  max-width: min(360px, 36vw);
+  padding: 6px var(--sp-md);
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--accent);
   font-size: var(--fs-small);
-  font-weight: 700;
+  font-weight: 800;
   border-radius: var(--r-pill);
   white-space: nowrap;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
+}
+.host-pill-label {
+  color: var(--accent);
+  font-size: var(--fs-overline);
+  font-weight: 900;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.host-pill-name {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 50%;
 }
 .session-pill {
   padding: 4px var(--sp-md);
@@ -429,8 +445,13 @@ body.page-main {
   .header-action-label { display: none; }
   .logout-btn,
   .header-action-btn { padding: 8px; }
-  .host-pill,
   .session-pill { display: none; }
+  .brand { display: none; }
+  .host-pill {
+    margin-left: auto;
+    max-width: 38vw;
+    padding: 6px 10px;
+  }
 }
 
 .app-main {
@@ -1124,6 +1145,10 @@ body.page-main {
 .upload-row-draft {
   opacity: 0.78;
   border-style: dashed;
+}
+.upload-row-folder {
+  background: var(--accent-light);
+  border-color: transparent;
 }
 .staging-row .staging-thumb {
   width: 40px; height: 40px;

@@ -37,7 +37,10 @@
       if (profile()) await profile().hydrateFromIdb();
       const info = await fetch('/api/host-info').then((r) => r.json());
       state.hostInfo = info;
-      $('#host-name').textContent = info.name || 'Host';
+      const hostName = info.name || 'Host';
+      $('#host-name').textContent = hostName;
+      const hostPill = $('.host-pill');
+      if (hostPill) hostPill.title = 'Host : ' + hostName;
       clientLog('info', '[app] host-info OK: ' + info.name);
 
       const me = await fetchMeWithRefresh();

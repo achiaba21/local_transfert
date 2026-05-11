@@ -11,9 +11,9 @@
   } = window.LTR;
   const $ = (s) => document.querySelector(s);
 
-  // V1.4.3 — staging : chaque fichier ajouté (drop / picker / paste)
+  // V1.4.3 — staging : chaque élément ajouté (fichier ou dossier)
   // attend un choix de destination (Host ou peer P2P) avant envoi.
-  // Map<stagingId, { file, li, sent }>
+  // Map<stagingId, { kind, file?, files?, bundle?, li, sent }>
   const staging = new Map();
   function profile() { return window.LTR.webProfile; }
   function stagingId() {
@@ -268,7 +268,7 @@
     const fi = document.querySelector(selector);
     if (!fi) return;
     fi.addEventListener('change', () => {
-      stageFiles(fi.files);
+      stageFiles(fi.files, { source: selector === '#folder-input' ? 'folder' : 'files' });
       fi.value = '';
     });
   }
@@ -286,16 +286,74 @@
 
   // V1.4.3 — staging : on AJOUTE chaque fichier dans #upload-list avec
   // un menu « Envoyer à ▾ ». Pas d'envoi avant choix utilisateur.
-  function stageFiles(fileList) {
+  function stageFiles(fileList, opts) {
+    opts = opts || {};
     const files = Array.from(fileList || []);
     if (files.length === 0) return;
-    for (const f of files) {
-      const id = stagingId();
-      const li = renderStagingRow(id, f);
-      document.getElementById('upload-list').appendChild(li);
-      const draftId = profile() ? profile().addDraft(f) : null;
-      staging.set(id, { file: f, li, sent: false, draftId });
+    if (opts.source === 'folder' || files.some((f) => f.webkitRelativePath)) {
+      const bundles = groupFolderFiles(files);
+      for (const bundle of bundles) {
+        if (bundle.files.length === 1 && !bundle.files[0].webkitRelativePath) {
+          stageSingleFile(bundle.files[0]);
+        } else {
+          stageFolderBundle(bundle);
+        }
+      }
+      return;
     }
+    for (const f of files) {
+      stageSingleFile(f);
+    }
+  }
+
+  function groupFolderFiles(files) {
+    const map = new Map();
+    for (const f of files) {
+      const rel = f.webkitRelativePath || f.name;
+      const parts = rel.split('/').filter(Boolean);
+      const root = parts.length > 1 ? parts[0] : '';
+      const key = root || ('__file__:' + f.name + ':' + f.size + ':' + f.lastModified);
+      if (!map.has(key)) map.set(key, { rootName: root || f.name, files: [] });
+      map.get(key).files.push(f);
+    }
+    return Array.from(map.values()).map((b) => ({
+      kind: b.files.some((f) => f.webkitRelativePath) ? 'folder' : 'file',
+      rootName: b.rootName,
+      files: b.files.sort((a, b2) => {
+        const ar = a.webkitRelativePath || a.name;
+        const br = b2.webkitRelativePath || b2.name;
+        return ar.localeCompare(br);
+      }),
+      totalSize: b.files.reduce((sum, f) => sum + f.size, 0),
+    }));
+  }
+
+  function stageSingleFile(file) {
+    const id = stagingId();
+    const li = renderStagingRow(id, file);
+    document.getElementById('upload-list').appendChild(li);
+    const draftId = profile() ? profile().addDraft(file) : null;
+    staging.set(id, { kind: 'file', file, li, sent: false, draftId });
+  }
+
+  function stageFolderBundle(bundle) {
+    const id = stagingId();
+    const li = renderFolderRow(id, bundle);
+    document.getElementById('upload-list').appendChild(li);
+    const draftId = profile() ? profile().addDraft({
+      name: bundle.rootName,
+      size: bundle.totalSize,
+      webkitRelativePath: bundle.rootName + '/',
+      type: 'application/x-directory',
+    }) : null;
+    staging.set(id, {
+      kind: 'folder',
+      files: bundle.files,
+      bundle,
+      li,
+      sent: false,
+      draftId,
+    });
   }
 
   function renderDraftRow(draft) {
@@ -338,6 +396,24 @@
       <button type="button" class="btn-ghost remove-btn" aria-label="Retirer" title="Retirer">\u2715</button>
       <div class="send-menu" hidden role="menu"></div>`;
     if (thumbUrl) li.dataset.thumbUrl = thumbUrl;
+    li.querySelector('.send-to-btn').addEventListener('click', () =>
+      toggleSendMenu(id));
+    li.querySelector('.remove-btn').addEventListener('click', () =>
+      removeStaging(id));
+    return li;
+  }
+
+  function renderFolderRow(id, bundle) {
+    const li = document.createElement('li');
+    li.className = 'upload-row staging-row upload-row-folder';
+    li.dataset.stagingId = id;
+    li.innerHTML = `
+      <span class="f-icon">📁</span>
+      <span class="f-name">${escapeHtml(bundle.rootName)}</span>
+      <span class="f-size" data-role="progress">${bundle.files.length} fichier${bundle.files.length > 1 ? 's' : ''} · ${formatBytes(bundle.totalSize)}</span>
+      <button type="button" class="btn btn-secondary send-to-btn">Envoyer \xC3\xA0 \u25BE</button>
+      <button type="button" class="btn-ghost remove-btn" aria-label="Retirer" title="Retirer">\u2715</button>
+      <div class="send-menu" hidden role="menu"></div>`;
     li.querySelector('.send-to-btn').addEventListener('click', () =>
       toggleSendMenu(id));
     li.querySelector('.remove-btn').addEventListener('click', () =>
@@ -407,20 +483,22 @@
 
   // Envoi vers Host : announce + upload (logique conservée de V1.1.7).
   async function sendToHost(entry) {
-    const file = entry.file;
     const li   = entry.li;
     const progressEl = li.querySelector('[data-role="progress"]');
     li.querySelector('.send-to-btn').remove();
     li.querySelector('.remove-btn').remove();
     progressEl.textContent = 'en attente…';
 
-    clientLog('info', '[upload] announce host: ' + file.name);
+    const files = entry.kind === 'folder' ? entry.files : [entry.file];
+    clientLog('info', '[upload] announce host: ' + files.length + ' file(s)');
     const announcePayload = {
-      files: [{
+      bundleKind: entry.kind || 'file',
+      bundleName: entry.bundle ? entry.bundle.rootName : '',
+      files: files.map((file) => ({
         name:         file.name,
         size:         file.size,
         relativePath: file.webkitRelativePath || '',
-      }],
+      })),
     };
     let resp;
     try {
@@ -443,7 +521,11 @@
       setTimeout(() => removeStaging(entry.li.dataset.stagingId), 6000);
       return;
     }
-    await uploadOne(file, li, body.uploadId);
+    if (entry.kind === 'folder') {
+      await uploadFolder(files, li, body.uploadId, entry.bundle.rootName);
+    } else {
+      await uploadOne(files[0], li, body.uploadId);
+    }
   }
 
   // Envoi vers un peer P2P via WebRTC DataChannel.
@@ -466,8 +548,40 @@
     entry.li.querySelector('.remove-btn').remove();
     const progressEl = entry.li.querySelector('[data-role="progress"]');
     progressEl.textContent = '→ ' + (peer.emoji || '') + ' ' + peer.displayName;
-    window.LTR.p2p.startSendTo(peer, [entry.file]);
+    if (entry.kind === 'folder') {
+      window.LTR.p2p.startSendTo(peer, entry.files, {
+        bundle: {
+          kind: 'folder',
+          name: entry.bundle.rootName,
+          fileCount: entry.files.length,
+          totalSize: entry.bundle.totalSize,
+        },
+      });
+    } else {
+      window.LTR.p2p.startSendTo(peer, [entry.file]);
+    }
     setTimeout(() => removeStaging(entry.li.dataset.stagingId), 4000);
+  }
+
+  async function uploadFolder(files, li, uploadId, folderName) {
+    const progressEl = li.querySelector('[data-role="progress"]');
+    const total = files.reduce((sum, f) => sum + f.size, 0);
+    let done = 0;
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      progressEl.textContent = `${i + 1}/${files.length} · 0 %`;
+      const result = await uploadOne(file, li, uploadId, {
+        labelPrefix: `${i + 1}/${files.length}`,
+        onFileProgress: (sent) => {
+          const pct = total > 0 ? Math.round(((done + sent) / total) * 100) : 0;
+          progressEl.textContent = `${i + 1}/${files.length} · ${pct} %`;
+        },
+      });
+      if (!result || !result.ok) return;
+      done += file.size;
+    }
+    progressEl.textContent = `✓ ${folderName || 'dossier'} envoyé`;
+    setTimeout(() => li.remove(), 4000);
   }
 
   // V1.6.5 — Sprint Stabilité (Wave 1, item C).
@@ -476,7 +590,8 @@
   // - status 401 : ok=false, redirect /login (par appelant)
   // - autre 4xx/5xx : ok=false, retry possible (par appelant)
   // - erreur réseau (xhr.onerror) : ok=false, retry possible
-  function tryUploadOnce(file, li, uploadId) {
+  function tryUploadOnce(file, li, uploadId, opts) {
+    opts = opts || {};
     return new Promise((resolve) => {
       const progressEl = li.querySelector('[data-role="progress"]');
 
@@ -493,8 +608,12 @@
       xhr.withCredentials = true;
       xhr.upload.onprogress = (e) => {
         if (!e.lengthComputable) return;
-        progressEl.textContent =
-          Math.round((e.loaded / e.total) * 100) + ' %';
+        if (opts.onFileProgress) {
+          opts.onFileProgress(e.loaded, e.total);
+        } else {
+          progressEl.textContent =
+            Math.round((e.loaded / e.total) * 100) + ' %';
+        }
       };
       xhr.onload = () => resolve({ status: xhr.status, ok: xhr.status === 200 });
       xhr.onerror = () => resolve({ status: 0, ok: false });
@@ -509,10 +628,11 @@
   // Note : le serveur ne supporte PAS encore le resume avec offset
   // (V1.6.6). Chaque retry repart from scratch — utile uniquement pour
   // les coupures réseau brèves (< ~7s cumulés) ou les 5xx transitoires.
-  function uploadOne(file, li, uploadId) {
+  function uploadOne(file, li, uploadId, opts) {
+    opts = opts || {};
     return new Promise(async (resolve) => {
       const progressEl = li.querySelector('[data-role="progress"]');
-      progressEl.textContent = '0 %';
+      progressEl.textContent = opts.labelPrefix ? opts.labelPrefix + ' · 0 %' : '0 %';
       const delays = [1000, 2000, 4000];
       let lastStatus = 0;
 
@@ -520,19 +640,21 @@
         if (attempt > 0) {
           progressEl.textContent = '⏳ retry ' + attempt + '/3…';
           await new Promise((r) => setTimeout(r, delays[attempt - 1]));
-          progressEl.textContent = '0 %';
+          progressEl.textContent = opts.labelPrefix ? opts.labelPrefix + ' · 0 %' : '0 %';
         }
-        const r = await tryUploadOnce(file, li, uploadId);
+        const r = await tryUploadOnce(file, li, uploadId, opts);
         lastStatus = r.status;
         if (r.ok) {
-          progressEl.textContent = '✓ envoyé';
-          setTimeout(() => li.remove(), 4000);
-          resolve();
+          if (!opts.labelPrefix) {
+            progressEl.textContent = '✓ envoyé';
+            setTimeout(() => li.remove(), 4000);
+          }
+          resolve({ ok: true });
           return;
         }
         if (r.status === 401) {
           goToLogin();
-          resolve();
+          resolve({ ok: false });
           return;
         }
         // 4xx (sauf 401) : pas de retry (erreur cliente définitive)
@@ -550,11 +672,11 @@
       btn.className = 'btn-resume-upload';
       btn.onclick = () => {
         progressEl.textContent = '0 %';
-        uploadOne(file, li, uploadId);  // récursif, nouveau cycle 3 retries
+        uploadOne(file, li, uploadId, opts);  // récursif, nouveau cycle 3 retries
       };
       progressEl.appendChild(span);
       progressEl.appendChild(btn);
-      resolve();
+      resolve({ ok: false });
     });
   }
 
