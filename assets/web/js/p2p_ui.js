@@ -125,7 +125,10 @@
     const card = state.uiCard;
     if (card) {
       const sub = card.querySelector('.peer-sub');
-      if (sub) sub.textContent = pct + ' % · ' + speed;
+      const label = state.uiStatusLabel || '';
+      if (sub) {
+        sub.textContent = (label ? label + ' · ' : '') + pct + ' % · ' + speed;
+      }
       const bar = card.querySelector('.peer-progress-bar > span');
       if (bar) bar.style.width = pct + '%';
     }
@@ -149,8 +152,11 @@
       totalAll  += s.totalBytes;
     });
     const pct = totalAll ? Math.floor((totalDone / totalAll) * 100) : 0;
+    const label = active.length === 1 && active[0].uiStatusLabel
+      ? active[0].uiStatusLabel + ' · '
+      : '';
     bar.querySelector('.p2p-sticky-text').textContent =
-      `${active.length} transfert${active.length > 1 ? 's' : ''} P2P · ${pct} %`;
+      `${label}${active.length} transfert${active.length > 1 ? 's' : ''} P2P · ${pct} %`;
     bar.hidden = false;
   }
 
@@ -165,9 +171,51 @@
     setTimeout(() => { c.hidden = true; }, 3000);
   }
 
+  // ================ V1.6.5 — Toast bloquant TOFU P2P (Wave 4 item L) ================
+  // Affiche un toast warning persistant avec 2 boutons. callback reçoit
+  // 'trust' ou 'refuse'. Pas d'auto-dismiss : l'utilisateur DOIT décider.
+  function showTofuToast(peerName, decideCb) {
+    clientLog('info', '[p2p:tofu-toast] ' + peerName);
+    let host = $('#p2p-tofu-host');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'p2p-tofu-host';
+      document.body.appendChild(host);
+    }
+    host.innerHTML = '';
+    const box = document.createElement('div');
+    box.className = 'p2p-tofu-toast';
+    box.innerHTML = `
+      <div class="p2p-tofu-icon">⚠</div>
+      <div class="p2p-tofu-body">
+        <div class="p2p-tofu-title">L'identité de « ${escapeHtml(peerName)} » a changé.</div>
+        <div class="p2p-tofu-sub">Vérifie qui c'est avant de recevoir des fichiers.</div>
+        <div class="p2p-tofu-actions">
+          <button type="button" class="p2p-tofu-btn p2p-tofu-trust">Faire confiance</button>
+          <button type="button" class="p2p-tofu-btn p2p-tofu-refuse">Refuser</button>
+        </div>
+      </div>`;
+    host.appendChild(box);
+    const finish = (decision) => {
+      host.innerHTML = '';
+      decideCb(decision);
+    };
+    box.querySelector('.p2p-tofu-trust').addEventListener('click',
+      () => finish('trust'));
+    box.querySelector('.p2p-tofu-refuse').addEventListener('click',
+      () => finish('refuse'));
+  }
+
   // ================ Helper ================
   function cssEscape(s) {
     return String(s).replace(/[^a-zA-Z0-9_-]/g, (c) => '\\' + c);
+  }
+
+  function escapeHtml(s) {
+    return (window.LTR && window.LTR.escapeHtml)
+      ? window.LTR.escapeHtml(s)
+      : String(s).replace(/[&<>"']/g,
+          (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 
   window.LTR = window.LTR || {};
@@ -175,7 +223,7 @@
     showIncomingModal, processModalQueue,
     markCardSending, setCardPhase, updateProgress,
     refreshSticky, showSticky,
-    toast, cssEscape,
+    toast, showTofuToast, cssEscape,
     ACCEPT_TTL_MS,
   };
 })();

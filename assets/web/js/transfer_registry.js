@@ -24,6 +24,7 @@
   // entries[].id = string unique. Chaque entry représente UN fichier.
   // direction: 'out' (j'envoie) | 'in' (je reçois)
   // status: 'pending' | 'sending' | 'sent' | 'received' | 'failed'
+  // phase précise les états transitoires pour l'UI P2P.
   let entries = [];
   // Map en mémoire des File originaux (sender uniquement) — perdus au
   // refresh, donc retry après refresh = impossible (toast invitera à
@@ -48,8 +49,114 @@
       }
     }
     if (dirty) saveToStorage();
+
+    // V1.6.5 — Sprint Stabilité (Wave 2 item E) : scanner les sidecars
+    // IndexedDB pour détecter les transferts P2P interrompus côté
+    // receveur. Permet à l'utilisateur de récupérer le partial déjà
+    // téléchargé en OPFS (« Télécharger partiel ») avant que le fichier
+    // soit auto-purgé. Le vrai resume P2P (re-négocier le DataChannel
+    // avec le sender) demande coopération du peer original — non livré
+    // dans cette wave.
+    loadPendingSidecars();
+
     render();
     clientLog('info', '[registry] init — ' + entries.length + ' entries');
+  }
+
+  async function loadPendingSidecars() {
+    if (!window.LTR.idb) return;
+    let pending;
+    try {
+      pending = await window.LTR.idb.all('ltr-p2p-pending');
+    } catch (e) {
+      clientLog('warn', '[registry] idb scan failed: ' + (e && e.message));
+      return;
+    }
+    if (!pending || pending.length === 0) return;
+    const now = Date.now();
+    let added = 0;
+    for (const item of pending) {
+      const v = item.value;
+      // Ignore les entrées récentes (< 30s) : peuvent être un transfert
+      // actif en cours dans un autre onglet qui sera bientôt finalisé.
+      if (!v.lastAckAt || (now - v.lastAckAt) < 30_000) continue;
+      // Évite duplication : si déjà une entry avec ce opfsName, skip.
+      if (entries.some((e) => e.opfsName === v.opfsName)) continue;
+      const entry = {
+        id: 'resume-' + v.opfsName,
+        direction:  'in',
+        peerDeviceId: v.peer ? v.peer.deviceId : '',
+        peerName:    v.peer ? v.peer.displayName : '',
+        peerEmoji:   v.peer ? v.peer.emoji : '',
+        name: v.fileMeta ? v.fileMeta.name : '?',
+        size: v.fileMeta ? v.fileMeta.size : 0,
+        status: 'interrupted',  // V1.6.5 — nouveau status
+        bytes: v.bytesWritten || 0,
+        error: null,
+        opfsName: v.opfsName,    // référence pour récupérer le partial
+        createdAt: v.startedAt || v.lastAckAt,
+        finishedAt: v.lastAckAt,
+      };
+      entries.push(entry);
+      ++added;
+    }
+    if (added > 0) {
+      saveToStorage();
+      render();
+      clientLog('info', '[registry] ' + added
+                       + ' transfert(s) P2P interrompu(s) détecté(s)');
+    }
+  }
+
+  // V1.6.5 — Wave 2 item E : récupère le fichier partiel depuis OPFS
+  // (même incomplet) et déclenche le download. Puis purge OPFS+sidecar.
+  async function downloadPartial(entryId) {
+    const entry = entries.find((e) => e.id === entryId);
+    if (!entry || !entry.opfsName) return;
+    try {
+      const root = await navigator.storage.getDirectory();
+      const handle = await root.getFileHandle(entry.opfsName);
+      const file = await handle.getFile();
+      const url = URL.createObjectURL(file);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = (entry.name || 'partial') + '.partial';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+
+      // Cleanup OPFS + sidecar.
+      try { await root.removeEntry(entry.opfsName); } catch {}
+      if (window.LTR.idb) {
+        try { await window.LTR.idb.delete('ltr-p2p-pending', entry.opfsName); }
+        catch {}
+      }
+      entry.status = 'received';
+      entry.finishedAt = Date.now();
+      saveToStorage();
+      render();
+    } catch (e) {
+      clientLog('error', '[registry] downloadPartial: ' + (e && e.message));
+    }
+  }
+
+  async function discardInterrupted(entryId) {
+    const entry = entries.find((e) => e.id === entryId);
+    if (!entry || !entry.opfsName) return;
+    try {
+      const root = await navigator.storage.getDirectory();
+      try { await root.removeEntry(entry.opfsName); } catch {}
+      if (window.LTR.idb) {
+        try { await window.LTR.idb.delete('ltr-p2p-pending', entry.opfsName); }
+        catch {}
+      }
+      entries = entries.filter((e) => e.id !== entryId);
+      saveToStorage();
+      render();
+    } catch (e) {
+      clientLog('error', '[registry] discardInterrupted: ' + (e && e.message));
+    }
   }
 
   function loadFromStorage() {
@@ -90,6 +197,7 @@
       name:          opts.name,
       size:          opts.size,
       status:        'pending',
+      phase:         'queued',
       bytes:         0,
       error:         null,
       createdAt:     Date.now(),
@@ -102,7 +210,7 @@
     return id;
   }
 
-  // Met à jour une entry. patch = {status?, bytes?, error?}
+  // Met à jour une entry. patch = {status?, phase?, bytes?, error?}
   function updateEntry(id, patch) {
     const e = entries.find((x) => x.id === id);
     if (!e) return;
@@ -189,25 +297,34 @@
               </button></li>`
           : '');
 
-    // Wire boutons retry.
-    list.querySelectorAll('.p2p-retry-btn').forEach((b) => {
-      b.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        retryFile(b.dataset.entryId);
+    // Wire boutons retry / resume / discard (delegation simple).
+    const wireButtons = (root) => {
+      root.querySelectorAll('.p2p-retry-btn').forEach((b) => {
+        b.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          retryFile(b.dataset.entryId);
+        });
       });
-    });
-    // Wire bouton voir tout (déploie le reste).
+      // V1.6.5 — Wave 2 item E.
+      root.querySelectorAll('.p2p-resume-btn').forEach((b) => {
+        b.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          downloadPartial(b.dataset.entryId);
+        });
+      });
+      root.querySelectorAll('.p2p-discard-btn').forEach((b) => {
+        b.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          discardInterrupted(b.dataset.entryId);
+        });
+      });
+    };
+    wireButtons(list);
     const moreBtn = list.querySelector('.p2p-more-btn');
     if (moreBtn) {
       moreBtn.addEventListener('click', () => {
-        // Re-render avec tous les entries.
         list.innerHTML = sorted.map(renderEntry).join('');
-        list.querySelectorAll('.p2p-retry-btn').forEach((b) => {
-          b.addEventListener('click', (ev) => {
-            ev.stopPropagation();
-            retryFile(b.dataset.entryId);
-          });
-        });
+        wireButtons(list);
       });
     }
     updateTabBadges();
@@ -221,7 +338,7 @@
       const pct = e.size > 0
         ? Math.floor((e.bytes / e.size) * 100) : 0;
       icon = '<span class="p2p-icon p2p-icon-sending">↻</span>';
-      sub = `${pct} % · ${peerStr}`;
+      sub = `${phaseLabel(e.phase)} · ${pct} % · ${peerStr}`;
       progress = `<div class="p2p-entry-bar"><span style="width:${pct}%"></span></div>`;
     } else if (e.status === 'sent' || e.status === 'received') {
       icon = '<span class="p2p-icon p2p-icon-done">✓</span>';
@@ -229,14 +346,29 @@
     } else if (e.status === 'failed') {
       icon = '<span class="p2p-icon p2p-icon-failed">✗</span>';
       sub = `${humanError(e.error)} · ${peerStr}`;
+    } else if (e.status === 'interrupted') {
+      // V1.6.5 — Wave 2 item E : transfert P2P interrompu, partial OPFS
+      // disponible pour récupération.
+      const pct = e.size > 0 ? Math.floor((e.bytes / e.size) * 100) : 0;
+      icon = '<span class="p2p-icon p2p-icon-failed">⏸</span>';
+      sub = `Interrompu · ${formatBytes(e.bytes)}/${formatBytes(e.size)} (${pct} %) · ${peerStr}`;
     } else {
       icon = '<span class="p2p-icon p2p-icon-pending">⏱</span>';
-      sub = `En attente · ${peerStr}`;
+      sub = `${phaseLabel(e.phase)} · ${peerStr}`;
     }
-    const retryBtn = (e.status === 'failed' && e.direction === 'out')
-      ? `<button type="button" class="p2p-retry-btn" data-entry-id="${e.id}"
-                aria-label="Réessayer">↻ Réessayer</button>`
-      : '';
+    let actionBtns = '';
+    if (e.status === 'failed' && e.direction === 'out') {
+      actionBtns = `<button type="button" class="p2p-retry-btn" data-entry-id="${e.id}"
+                aria-label="Réessayer">↻ Réessayer</button>`;
+    } else if (e.status === 'interrupted') {
+      // V1.6.5 — Wave 2 item E : 2 actions sur transfert interrompu.
+      actionBtns =
+        `<button type="button" class="p2p-resume-btn" data-action="partial"
+                 data-entry-id="${e.id}" aria-label="Télécharger partiel">↓ Partiel</button>
+         <button type="button" class="p2p-discard-btn" data-action="discard"
+                 data-entry-id="${e.id}" aria-label="Annuler">✕ Annuler</button>`;
+    }
+    const retryBtn = actionBtns;
     return `
       <li class="p2p-entry p2p-entry-${e.status}">
         ${icon}
@@ -263,8 +395,32 @@
       'read':             'Lecture impossible',
       'end':              'Échec finalisation',
       'session-meta':     'Échec session',
+      'receiver_ready':   'Récepteur non prêt',
+      'quota_insuffisant': 'Espace insuffisant',
+      'taille_navigateur': 'Navigateur trop limité',
+      'opfs_indisponible': 'Stockage indisponible',
+      'opfs_resume':       'Reprise indisponible',
+      'protocole_session': 'Session invalide',
+      'protocole_fichier': 'Protocole fichier invalide',
+      'protocole_fin':     'Fin de session invalide',
+      'protocole_file_end': 'Fin de fichier invalide',
     };
     return map[err] || 'Échec ' + err;
+  }
+
+  function phaseLabel(phase) {
+    const map = {
+      queued: 'En attente',
+      preparing: 'Préparation',
+      connecting: 'Connexion P2P',
+      sending: 'Envoi',
+      writing: 'Écriture disque',
+      resuming: 'Reprise',
+      finalizing: 'Finalisation',
+      verifying: 'Vérification',
+      done: 'Terminé',
+    };
+    return map[phase] || 'En attente';
   }
 
   function formatTime(ts) {

@@ -27,6 +27,7 @@
                             && navigator.storage
                             && navigator.storage.getDirectory);
   const FALLBACK_CAP_BYTES = 1024 * 1024 * 1024;  // 1 Go cap si Blob
+  const STORAGE_SAFETY_BYTES = 64 * 1024 * 1024;  // marge metadata/OPFS
   console.log('[p2p] V1.6.3 OPFS_AVAILABLE=', OPFS_AVAILABLE,
               ' navigator.storage=', !!navigator.storage,
               ' getDirectory=', !!(navigator.storage
@@ -34,6 +35,68 @@
 
   function transport() { return window.LTR.p2pTransport; }
   function ui()        { return window.LTR.p2pUi; }
+
+  function makeSessionId() {
+    if (globalThis.crypto && globalThis.crypto.randomUUID) {
+      return globalThis.crypto.randomUUID();
+    }
+    return 'p2p-' + Date.now().toString(36)
+      + '-' + Math.random().toString(36).slice(2, 10);
+  }
+
+  async function hasStorageRoom(requiredBytes) {
+    if (!navigator.storage || !navigator.storage.estimate) {
+      return { ok: true, available: null };
+    }
+    try {
+      const est = await navigator.storage.estimate();
+      const quota = est.quota || 0;
+      const usage = est.usage || 0;
+      if (!quota) return { ok: true, available: null };
+      const available = Math.max(0, quota - usage);
+      return {
+        ok: available >= requiredBytes + STORAGE_SAFETY_BYTES,
+        available,
+      };
+    } catch (e) {
+      clientLog('warn', '[p2p] storage estimate failed: '
+                        + (e && e.message));
+      return { ok: true, available: null };
+    }
+  }
+
+  async function receiverAbort(state, error, label) {
+    clientLog('warn', '[p2p] receiver abort ' + error);
+    const fs = state.fileStatuses && state.fileStatuses[state.fileStatuses.length - 1];
+    if (fs && fs.status === 'sending') {
+      fs.status = 'failed';
+      fs.error = error;
+      syncFileStatus(state, fs);
+    }
+    if (state.dc && state.dc.readyState === 'open') {
+      try {
+        state.dc.send(JSON.stringify({ kind: 'receiver-error', error }));
+      } catch {}
+      await new Promise((r) => setTimeout(r, 80));
+    }
+    if (ui()) ui().toast(label || 'Réception impossible', 'warning');
+    cleanup(state, label || 'Échec réception');
+  }
+
+  function setSessionUiState(state, text) {
+    state.uiStatusLabel = text || '';
+    if (state.uiCard && ui()) {
+      const sub = state.uiCard.querySelector('.peer-sub');
+      if (sub && text) sub.textContent = text;
+    }
+    if (ui()) ui().refreshSticky();
+  }
+
+  function updateFilePhase(state, fs, phase) {
+    if (!fs) return;
+    fs.phase = phase;
+    syncFileStatus(state, fs);
+  }
 
   async function awaitDrain(dc) {
     while (dc.readyState === 'open' && dc.bufferedAmount > BUFFER_HIGH) {
@@ -81,7 +144,7 @@
   function syncFileStatus(state, fs) {
     if (!fs || !fs.entryId || !window.LTR.transferRegistry) return;
     window.LTR.transferRegistry.updateEntry(fs.entryId, {
-      status: fs.status, bytes: fs.bytes, error: fs.error,
+      status: fs.status, bytes: fs.bytes, error: fs.error, phase: fs.phase,
     });
     if ((fs.status === 'sent' || fs.status === 'received')
         && state.peer) {
@@ -115,6 +178,52 @@
     dc.onclose = () => {
       cleanup(state, state.allFilesSent ? '✓ Envoyé' : '✗ Connexion fermée');
     };
+    dc.onmessage = (ev) => {
+      if (typeof ev.data !== 'string') return;
+      let msg;
+      try { msg = JSON.parse(ev.data); } catch { return; }
+      if (msg.kind === 'ack' && typeof msg.bytes === 'number') {
+        state.bytesAckedByReceiver = msg.bytes;
+        state.lastAckAt = Date.now();
+        if (ui()) ui().updateProgress(state);
+      } else if (msg.kind === 'receiver-error') {
+        const reason = msg.error || 'receiver-error';
+        clientLog('warn', '[p2p] receiver-error: ' + reason);
+        const fs = state.fileStatuses && state.fileStatuses[state.currentFileIdx];
+        if (fs) {
+          fs.status = 'failed';
+          fs.error = reason;
+          syncFileStatus(state, fs);
+        }
+        cleanup(state, humanReceiverError(reason));
+      } else if (msg.kind === 'file-ready') {
+        const key = msg.fileId || (msg.sessionId + ':' + msg.idx);
+        const waiter = state.fileReadyWaiters && state.fileReadyWaiters.get(key);
+        if (waiter) {
+          state.fileReadyWaiters.delete(key);
+          waiter.resolve({
+            offset: Math.max(0, Number(msg.offset) || 0),
+          });
+        }
+      }
+    };
+  }
+
+  function waitForFileReady(state, meta) {
+    const key = meta.fileId;
+    state.fileReadyWaiters = state.fileReadyWaiters || new Map();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        state.fileReadyWaiters.delete(key);
+        reject(new Error('file-ready timeout'));
+      }, WATCHDOG_NO_DATA_MS);
+      state.fileReadyWaiters.set(key, {
+        resolve: (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+      });
+    });
   }
 
   async function sendNextFile(state) {
@@ -138,13 +247,17 @@
     const fs = state.fileStatuses[state.currentFileIdx];
     state.startedAt = state.startedAt || Date.now();
     fs.status = 'sending';
+    fs.phase = state.currentFileIdx === 0 ? 'preparing' : 'sending';
     syncFileStatus(state, fs);
+    setSessionUiState(state, 'Préparation…');
 
     await awaitDrain(state.dc);
 
     if (state.currentFileIdx === 0) {
+      state.sessionId = state.sessionId || makeSessionId();
       const summary = {
         kind: 'session-meta',
+        sessionId: state.sessionId,
         count: state.files.length,
         totalBytes: state.totalBytes,
       };
@@ -157,18 +270,45 @@
     }
     const meta = {
       kind: 'file-meta',
+      sessionId: state.sessionId,
       name: file.name,
       size: file.size,
       type: file.type || 'application/octet-stream',
       idx:  state.currentFileIdx,
+      fileId: state.sessionId + ':' + state.currentFileIdx,
     };
     if (!await safeSend(state, JSON.stringify(meta), 'file-meta')) {
       skipFailedFile(state, fs, 'meta');
       return;
     }
 
-    const reader = file.stream().getReader();
+    let resumeOffset = 0;
+    try {
+      const ready = await waitForFileReady(state, meta);
+      resumeOffset = Math.min(file.size, ready.offset || 0);
+    } catch (e) {
+      clientLog('warn', '[p2p] receiver not ready: ' + (e && e.message));
+      skipFailedFile(state, fs, 'receiver_ready');
+      return;
+    }
+
+    if (resumeOffset > 0) {
+      state.bytesSent += resumeOffset;
+      state.bytesAckedByReceiver = Math.max(
+        state.bytesAckedByReceiver, state.bytesSent);
+      fs.bytes = resumeOffset;
+      fs.phase = 'resuming';
+      syncFileStatus(state, fs);
+      setSessionUiState(state, 'Reprise à ' + Math.floor(
+        (resumeOffset / Math.max(1, file.size)) * 100) + ' %');
+    } else {
+      updateFilePhase(state, fs, 'sending');
+      setSessionUiState(state, 'Envoi…');
+    }
+
+    const reader = file.slice(resumeOffset).stream().getReader();
     let aborted = false;
+    let fileBytesSent = resumeOffset;
     try {
       while (true) {
         const { value, done } = await reader.read();
@@ -186,7 +326,8 @@
             break;
           }
           state.bytesSent += slice.byteLength;
-          fs.bytes = state.bytesSent;
+          fileBytesSent += slice.byteLength;
+          fs.bytes = fileBytesSent;
           pos = end;
           if (ui()) ui().updateProgress(state);
         }
@@ -201,8 +342,14 @@
     if (aborted) { skipFailedFile(state, fs, 'send'); return; }
 
     await awaitDrain(state.dc);
+    updateFilePhase(state, fs, 'finalizing');
+    setSessionUiState(state, 'Finalisation…');
     if (!await safeSend(state, JSON.stringify({
-        kind: 'file-end', idx: state.currentFileIdx }), 'file-end')) {
+        kind: 'file-end',
+        sessionId: state.sessionId,
+        idx: state.currentFileIdx,
+        fileId: state.sessionId + ':' + state.currentFileIdx,
+      }), 'file-end')) {
       skipFailedFile(state, fs, 'end');
       return;
     }
@@ -229,6 +376,13 @@
           dc.send(JSON.stringify({
             kind: 'ack', bytes: state.bytesReceived }));
         } catch {}
+        // V1.6.5 — Sprint Stabilité (Wave 2 item E) : persiste l'état
+        // de réception en cours dans IndexedDB pour qu'un reload onglet
+        // détecte le pending et propose « Reprendre » à l'utilisateur.
+        const cur = state.activeFile;
+        if (cur && cur.opfsName && cur.received < cur.size) {
+          updatePendingSidecar(state, cur).catch(() => {});
+        }
       }, ACK_INTERVAL_MS);
     };
     dc.onerror = (e) => {
@@ -250,7 +404,7 @@
       } else {
         // V1.6.3 — chunk binaire : sérialise via writeQueue pour ne
         // pas perdre l'ordre quand OPFS write est async.
-        const cur = state.receivingFiles[state.receivingFiles.length - 1];
+        const cur = state.activeFile;
         if (!cur) return;
         if (state.noDataWatchdog) {
           clearTimeout(state.noDataWatchdog);
@@ -268,6 +422,16 @@
             }
             cur.received += data.byteLength;
             state.bytesReceived += data.byteLength;
+            const fs = state.fileStatuses[cur.idx];
+            if (fs) {
+              fs.bytes = cur.received;
+              fs.phase = 'writing';
+              const now = Date.now();
+              if (!cur.lastRegistryAt || now - cur.lastRegistryAt > 500) {
+                cur.lastRegistryAt = now;
+                syncFileStatus(state, fs);
+              }
+            }
             // Log toutes les ~50 Mo pour visualiser la progression OPFS.
             const MILESTONE = 50 * 1024 * 1024;
             const prevMS = Math.floor((cur.received - data.byteLength) / MILESTONE);
@@ -288,13 +452,37 @@
 
   async function handleReceiverControl(msg, state) {
     if (msg.kind === 'session-meta') {
+      if (!msg.sessionId || typeof msg.count !== 'number') {
+        await receiverAbort(state, 'protocole_session',
+          'Session P2P invalide');
+        return;
+      }
+      const room = await hasStorageRoom(msg.totalBytes || 0);
+      if (!room.ok) {
+        await receiverAbort(state, 'quota_insuffisant',
+          'Espace insuffisant pour recevoir');
+        return;
+      }
+      state.sessionId = msg.sessionId;
+      state.expectedFileCount = msg.count;
       state.totalBytes = msg.totalBytes || 0;
       state.startedAt = Date.now();
+      setSessionUiState(state, 'Vérification espace…');
     } else if (msg.kind === 'file-meta') {
       const idx = state.fileStatuses.length;
+      const expectedFileId = state.sessionId + ':' + idx;
+      if (!state.sessionId || msg.sessionId !== state.sessionId
+          || msg.idx !== idx || msg.fileId !== expectedFileId
+          || state.activeFile) {
+        await receiverAbort(state, 'protocole_fichier',
+          'Protocole fichier invalide');
+        return;
+      }
+      const resume = await findResumeCandidate(state, msg);
       const cur = {
+        idx, fileId: msg.fileId,
         name: msg.name, size: msg.size, type: msg.type,
-        received: 0,
+        received: resume ? resume.bytesWritten : 0,
         // OPFS-or-Blob — décidé selon capability et taille.
         chunks: null, opfsHandle: null, opfsWritable: null,
         opfsName: null, opfsReady: null,
@@ -302,7 +490,9 @@
       };
       // V1.6.3 — Setup storage : OPFS si dispo, sinon Blob avec cap.
       if (OPFS_AVAILABLE) {
-        cur.opfsName = `ltr-${state.peer.deviceId}-${idx}-${Date.now()}`;
+        cur.opfsName = resume
+          ? resume.opfsName
+          : `ltr-${state.peer.deviceId}-${idx}-${Date.now()}`;
         console.log('[p2p] file-meta', idx, msg.name,
                     '(' + msg.size + 'B) → OPFS path,',
                     ' opfsName=', cur.opfsName);
@@ -310,35 +500,33 @@
           const root = await navigator.storage.getDirectory();
           cur.opfsHandle = await root.getFileHandle(
             cur.opfsName, { create: true });
-          cur.opfsWritable = await cur.opfsHandle.createWritable();
+          cur.opfsWritable = await cur.opfsHandle.createWritable({
+            keepExistingData: !!resume,
+          });
           console.log('[p2p] OPFS handle ready for', cur.opfsName);
         })().catch((e) => {
           console.error('[p2p] OPFS init failed:', e);
           clientLog('error', '[p2p] OPFS init failed: ' + (e && e.message));
+          if (cur.received > 0) {
+            cur.initFailed = true;
+            receiverAbort(state, 'opfs_resume',
+              'Reprise navigateur indisponible').catch(() => {});
+            return;
+          }
+          if (cur.size > FALLBACK_CAP_BYTES) {
+            receiverAbort(state, 'opfs_indisponible',
+              'Stockage navigateur indisponible').catch(() => {});
+            return;
+          }
           cur.chunks = [];  // fallback Blob pour ce fichier
         });
       } else if (msg.size > FALLBACK_CAP_BYTES) {
-        // Cap soft 1 Go en mode Blob fallback.
         console.warn('[p2p] file >1 Go REFUSED (Blob fallback):',
                      msg.name, msg.size, 'B');
         clientLog('warn', '[p2p] file too big for Blob fallback: '
                           + msg.size);
-        if (ui()) ui().toast(
-          `${msg.name} >1 Go : utilise un navigateur récent`, 'warning');
-        const fs = {
-          idx, name: msg.name, size: msg.size,
-          status: 'failed', bytes: 0, error: 'taille_navigateur',
-          entryId: null,
-        };
-        if (window.LTR.transferRegistry) {
-          fs.entryId = window.LTR.transferRegistry.addEntry({
-            direction: 'in', peer: state.peer,
-            name: msg.name, size: msg.size,
-          });
-        }
-        state.fileStatuses.push(fs);
-        state.receivingFiles.push(cur);  // entry vide pour l'index
-        syncFileStatus(state, fs);
+        await receiverAbort(state, 'taille_navigateur',
+          'Navigateur trop limité pour ce fichier');
         return;
       } else {
         console.log('[p2p] file-meta', idx, msg.name,
@@ -346,9 +534,12 @@
         cur.chunks = [];
       }
       state.receivingFiles.push(cur);
+      state.activeFile = cur;
+      if (cur.received > 0) state.bytesReceived += cur.received;
       const fs = {
-        idx, name: msg.name, size: msg.size,
-        status: 'sending', bytes: 0, error: null, entryId: null,
+        idx, fileId: msg.fileId, name: msg.name, size: msg.size,
+        status: 'sending', bytes: cur.received, error: null, entryId: null,
+        phase: cur.received > 0 ? 'resuming' : 'writing',
       };
       if (window.LTR.transferRegistry) {
         fs.entryId = window.LTR.transferRegistry.addEntry({
@@ -360,9 +551,16 @@
       }
       state.fileStatuses.push(fs);
       syncFileStatus(state, fs);
+      setSessionUiState(state, cur.received > 0 ? 'Reprise réception…' : 'Écriture disque…');
+      await sendFileReady(state, cur);
     } else if (msg.kind === 'file-end') {
-      await finalizeReceivedFile(state);
+      await finalizeReceivedFile(state, msg);
     } else if (msg.kind === 'all-done') {
+      if (state.activeFile) {
+        await receiverAbort(state, 'protocole_fin',
+          'Fin de session invalide');
+        return;
+      }
       state.allDoneSeen = true;
       if (state.uiCard) {
         const sub = state.uiCard.querySelector('.peer-sub');
@@ -371,16 +569,24 @@
     }
   }
 
-  async function finalizeReceivedFile(state) {
-    const cur = state.receivingFiles[state.receivingFiles.length - 1];
+  async function finalizeReceivedFile(state, msg) {
+    const cur = state.activeFile;
     if (!cur) return;
     const fs = state.fileStatuses[state.fileStatuses.length - 1];
+    if (!msg || msg.sessionId !== state.sessionId
+        || msg.idx !== cur.idx || msg.fileId !== cur.fileId) {
+      await receiverAbort(state, 'protocole_file_end',
+        'Fin de fichier invalide');
+      return;
+    }
 
     // V1.6.3 — Attendre que la write queue OPFS soit drainée AVANT
     // de comparer received vs size.
     if (cur.writeQueue) {
       try { await cur.writeQueue; } catch {}
     }
+    updateFilePhase(state, fs, 'verifying');
+    setSessionUiState(state, 'Vérification fichier…');
     if (cur.size && cur.received !== cur.size) {
       clientLog('warn', '[p2p] file truncated: ' + cur.name
                        + ' received=' + cur.received + ' expected=' + cur.size);
@@ -451,8 +657,110 @@
     if (fs) {
       fs.status = 'received';
       fs.bytes = cur.received;
+      fs.phase = 'done';
       syncFileStatus(state, fs);
     }
+    state.activeFile = null;
+    // V1.6.5 — Sprint Stabilité (Wave 2 item E) : sidecar cleanup OK.
+    clearPendingSidecar(cur).catch(() => {});
+  }
+
+  async function sendFileReady(state, cur) {
+    if (cur.opfsReady) {
+      try { await cur.opfsReady; } catch {}
+    }
+    if (cur.initFailed) return;
+    if (!state.dc || state.dc.readyState !== 'open') return;
+    try {
+      state.dc.send(JSON.stringify({
+        kind: 'file-ready',
+        sessionId: state.sessionId,
+        idx: cur.idx,
+        fileId: cur.fileId,
+        offset: cur.received || 0,
+      }));
+    } catch (e) {
+      clientLog('warn', '[p2p] file-ready send failed: '
+                        + (e && e.message));
+    }
+  }
+
+  async function findResumeCandidate(state, msg) {
+    if (!OPFS_AVAILABLE || !window.LTR.idb) return null;
+    let pending;
+    try {
+      pending = await window.LTR.idb.all('ltr-p2p-pending');
+    } catch {
+      return null;
+    }
+    const match = (pending || [])
+      .map((item) => item.value)
+      .filter((v) => {
+        const meta = v && v.fileMeta;
+        const peer = v && v.peer;
+        return v && meta && peer
+          && peer.deviceId === state.peer.deviceId
+          && meta.name === msg.name
+          && meta.size === msg.size
+          && v.bytesWritten > 0
+          && v.bytesWritten < msg.size;
+      })
+      .sort((a, b) => (b.lastAckAt || 0) - (a.lastAckAt || 0))[0];
+    if (!match || !match.opfsName) return null;
+    try {
+      const root = await navigator.storage.getDirectory();
+      const handle = await root.getFileHandle(match.opfsName);
+      const file = await handle.getFile();
+      const bytesWritten = Math.min(file.size, match.bytesWritten || 0);
+      if (bytesWritten <= 0 || bytesWritten >= msg.size) return null;
+      return { opfsName: match.opfsName, bytesWritten };
+    } catch (e) {
+      clientLog('warn', '[p2p] resume candidate invalid: '
+                        + (e && e.message));
+      return null;
+    }
+  }
+
+  function humanReceiverError(error) {
+    const map = {
+      quota_insuffisant: 'Espace insuffisant',
+      protocole_session: 'Session invalide',
+      protocole_fichier: 'Protocole fichier invalide',
+      protocole_fin: 'Fin de session invalide',
+      protocole_file_end: 'Fin de fichier invalide',
+      taille_navigateur: 'Navigateur trop limité',
+      opfs_indisponible: 'Stockage navigateur indisponible',
+      opfs_resume: 'Reprise navigateur indisponible',
+    };
+    return map[error] || 'Récepteur indisponible';
+  }
+
+  // V1.6.5 — Wave 2 item E : helpers de persistance du sidecar IndexedDB.
+  // Utilise opfsName comme clé unique (collision impossible : Date.now() +
+  // deviceId + idx). Si IndexedDB indispo (Safari iOS sandboxed) : silent
+  // skip — le receveur perd la possibilité de reprendre, mais le transfert
+  // se déroule normalement (fallback comportement V1.6.4).
+  async function updatePendingSidecar(state, cur) {
+    if (!window.LTR.idb || !cur.opfsName) return;
+    const entry = {
+      opfsName: cur.opfsName,
+      peer: {
+        deviceId:    state.peer.deviceId,
+        displayName: state.peer.displayName,
+        emoji:       state.peer.emoji,
+        platformLabel: state.peer.platformLabel,
+      },
+      fileMeta: { name: cur.name, size: cur.size, type: cur.type },
+      bytesWritten: cur.received,
+      lastAckAt:    Date.now(),
+      startedAt:    state.startedAt || Date.now(),
+    };
+    return window.LTR.idb.set('ltr-p2p-pending', cur.opfsName, entry);
+  }
+
+  async function clearPendingSidecar(cur) {
+    if (!window.LTR.idb || !cur || !cur.opfsName) return;
+    return window.LTR.idb.delete('ltr-p2p-pending', cur.opfsName);
   }
 
   function cleanup(state, label) {
@@ -482,6 +790,16 @@
       const x = state.uiCard.querySelector('.peer-cancel-btn');
       if (x) x.remove();
     }
+    // V1.6.5 — Wave 2 item E : nettoie aussi les sidecars IndexedDB des
+    // fichiers en cours sur cette session si on cleanup avec succès.
+    // En cas d'échec (label ≠ ✓ Reçu), on les LAISSE pour permettre la
+    // reprise au prochain boot d'onglet.
+    const isSuccess = label && label.startsWith('✓');
+    if (isSuccess && state.role === 'receiver' && state.receivingFiles) {
+      for (const cur of state.receivingFiles) {
+        if (cur.opfsName) clearPendingSidecar(cur).catch(() => {});
+      }
+    }
     const T = transport();
     if (state.peer && state.role && T) {
       T.conns.delete(T.connKey(state.peer.deviceId, state.role));
@@ -505,5 +823,6 @@
     CHUNK_SIZE, BUFFER_HIGH, BUFFER_LOW,
     ACK_INTERVAL_MS, NO_ACK_TIMEOUT_MS,
     WATCHDOG_NO_DATA_MS, DRAIN_TIMEOUT_MS,
+    hasStorageRoom,
   };
 })();
