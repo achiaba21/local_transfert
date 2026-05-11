@@ -41,7 +41,8 @@ public:
     std::optional<std::string> authenticate(const std::string& providedPin,
                                             const std::string& expectedPin,
                                             const std::string& deviceId,
-                                            const std::string& userAgent);
+                                            const std::string& userAgent,
+                                            const std::string& customName = "");
 
     // Récupère la session par token si elle existe et n'est pas expirée.
     std::optional<WebSession> validate(const std::string& token) const;
@@ -84,6 +85,11 @@ public:
     std::optional<std::string>
     findTokenByDeviceId(const std::string& deviceId) const;
 
+    // Met à jour l'alias lisible d'un navigateur déjà authentifié.
+    // Le nom public reste "nom automatique (alias)".
+    bool updateCustomName(const std::string& token,
+                          const std::string& customName);
+
     // V1.6.5 — Sprint Stabilité (Wave 3 item H).
     // Configure le secret HMAC utilisé pour signer/vérifier les tokens
     // persistents. À appeler 1 fois au start, après le chargement du
@@ -118,6 +124,7 @@ private:
     mutable std::mutex mu_;
     std::map<std::string, WebSession> sessions_;        // token → session
     std::map<std::string, std::string> deviceToToken_;  // deviceId → token
+    std::map<std::string, std::string> customNames_;    // deviceId → alias
     std::string hmacSecret_;                            // V1.6.5 Wave 3
 };
 

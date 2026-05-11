@@ -40,11 +40,12 @@
       const hostName = info.name || 'Host';
       $('#host-name').textContent = hostName;
       const hostPill = $('.host-pill');
-      if (hostPill) hostPill.title = 'Host : ' + hostName;
+      if (hostPill) hostPill.title = 'Hôte : ' + hostName;
       clientLog('info', '[app] host-info OK: ' + info.name);
 
       const me = await fetchMeWithRefresh();
       if (!me) return;
+      await syncStoredCustomName(me);
       setSessionStatus(me.restored ? 'Session restaurée' : 'Connecté', 'ok');
       setTimeout(() => setSessionStatus('Connecté', 'ok'), 2500);
 
@@ -64,6 +65,7 @@
       // V1.2 — Sprint Web P2P : annuaire + handler SSE web-peers.
       if (window.LTR.peers && window.LTR.peers.init) {
         window.LTR.peers.init();
+        if (window.LTR.peers.setSelf) window.LTR.peers.setSelf(me);
         if (window.LTR.addSseListener) {
           window.LTR.addSseListener('web-peers', (ev) => {
             try {
@@ -87,6 +89,26 @@
       clientLog('error', '[app] boot threw: ' + (e && e.message));
       setSessionStatus('Session expirée', 'error');
       goToLogin();
+    }
+  }
+
+  async function syncStoredCustomName(me) {
+    let stored = '';
+    try { stored = (localStorage.getItem('ltr_custom_name') || '').trim(); }
+    catch (e) {}
+    if (!stored || stored === (me.customName || '')) return;
+    try {
+      const resp = await fetch('/api/me/name', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ custom_name: stored }),
+      });
+      if (!resp.ok) return;
+      const body = await resp.json();
+      Object.assign(me, body);
+    } catch (e) {
+      clientLog('warn', '[app] custom name sync failed');
     }
   }
 

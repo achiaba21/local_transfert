@@ -51,6 +51,15 @@ int main() {
         assert(s->device.sessionToken == token);
     }
 
+    // Alias utilisateur : le nom auto reste, l'alias apparaît entre parenthèses.
+    {
+        assert(store.updateCustomName(token, "Serge"));
+        auto s = store.validate(token);
+        assert(s.has_value());
+        assert(s->customName == "Serge");
+        assert(s->displayName.find("(Serge)") != std::string::npos);
+    }
+
     // Validate avec mauvais token → nullopt
     {
         auto s = store.validate("deadbeef");

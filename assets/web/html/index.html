@@ -13,7 +13,7 @@
   <span class="brand-dot" aria-hidden="true"></span>
   <h1 class="brand">LocalTransfer</h1>
   <span class="host-pill" aria-label="Appareil hôte">
-    <span class="host-pill-label">Host</span>
+    <span class="host-pill-label">Hôte</span>
     <span class="host-pill-name" id="host-name">…</span>
   </span>
   <span class="session-pill" id="session-status" role="status"
@@ -53,6 +53,19 @@
     <!-- V1.2 — Sprint Web P2P : section annuaire des autres appareils web. -->
     <section class="peers-section" hidden aria-labelledby="peers-title">
       <h2 id="peers-title" class="overline">À envoyer à…</h2>
+      <div class="self-peer" id="self-peer" hidden>
+        <div class="self-peer-main">
+          <span class="self-peer-emoji" id="self-peer-emoji" aria-hidden="true">👤</span>
+          <div class="self-peer-text">
+            <span class="self-peer-label">Vous êtes visible comme</span>
+            <strong id="self-peer-name">…</strong>
+            <span id="self-peer-sub">…</span>
+          </div>
+        </div>
+        <button type="button" class="btn-ghost self-peer-edit" id="self-peer-edit">
+          Modifier
+        </button>
+      </div>
       <ul class="peers-list" id="peers-list" role="listbox"
           aria-label="Liste des autres appareils connectés"></ul>
       <input type="file" id="peers-file-input" multiple
@@ -115,7 +128,7 @@
         <button type="button" class="tx-tab tx-tab-active" id="tx-tab-host"
                 role="tab" aria-selected="true"
                 aria-controls="transfers-list-host">
-          Host · <span id="tx-count">0</span>
+          Hôte · <span id="tx-count">0</span>
         </button>
         <button type="button" class="tx-tab" id="tx-tab-p2p"
                 role="tab" aria-selected="false"

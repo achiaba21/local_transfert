@@ -225,6 +225,34 @@ body.page-login {
   accent-color: var(--accent);
   cursor: pointer;
 }
+.login-name-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+  width: 100%;
+  max-width: 260px;
+  margin-top: var(--sp-md);
+  color: var(--text-secondary);
+  font-size: var(--fs-small);
+  font-weight: 700;
+  text-align: left;
+}
+.login-name-field input {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 var(--sp-md);
+  border: 1px solid var(--separator);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+}
+.login-name-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.14);
+}
 .opt-info {
   color: var(--text-secondary);
   cursor: help;
@@ -865,6 +893,60 @@ body.page-main {
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+.self-peer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-md);
+  margin-bottom: var(--sp-md);
+  padding: var(--sp-md);
+  background: var(--surface);
+  border: 1px solid var(--separator);
+  border-radius: var(--r-md);
+}
+.self-peer[hidden] { display: none; }
+.self-peer-main {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-md);
+  min-width: 0;
+}
+.self-peer-emoji {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  background: var(--accent-light);
+  border-radius: 50%;
+  font-size: 24px;
+}
+.self-peer-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.self-peer-label {
+  color: var(--text-secondary);
+  font-size: var(--fs-overline);
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.self-peer-text strong {
+  color: var(--text);
+  font-size: var(--fs-body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.self-peer-text span:last-child {
+  color: var(--text-secondary);
+  font-size: var(--fs-small);
+}
+.self-peer-edit {
+  flex: 0 0 auto;
 }
 .peers-list {
   list-style: none;

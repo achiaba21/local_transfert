@@ -18,12 +18,16 @@
   let peers = [];   // [{ deviceId, displayName, emoji, platformLabel }]
   let listEl = null;
   let pickerInputEl = null;
+  let selfInfo = null;
   let pendingTargetDeviceId = null;
   let onPeerClickedCb = null;
 
+  const CUSTOM_NAME_KEY = 'ltr_custom_name';
+
   function render() {
     if (!listEl) return;
-    if (peers.length === 0) {
+    renderSelf();
+    if (peers.length === 0 && !selfInfo) {
       listEl.innerHTML = '';
       const sec = $('.peers-section');
       if (sec) sec.hidden = true;
@@ -51,6 +55,52 @@
         }
       });
     });
+  }
+
+  function renderSelf() {
+    const box = $('#self-peer');
+    if (!box) return;
+    if (!selfInfo) {
+      box.hidden = true;
+      return;
+    }
+    box.hidden = false;
+    $('#self-peer-emoji').textContent = selfInfo.emoji || '👤';
+    $('#self-peer-name').textContent = selfInfo.displayName || 'Ce navigateur';
+    $('#self-peer-sub').textContent = selfInfo.platformLabel || '';
+  }
+
+  async function renameSelf() {
+    if (!selfInfo) return;
+    const current = selfInfo.customName || '';
+    const next = window.prompt('Nom sur ce navigateur', current);
+    if (next === null) return;
+    const customName = next.trim();
+    try {
+      const resp = await fetch('/api/me/name', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ custom_name: customName }),
+      });
+      if (resp.status === 401) {
+        window.LTR.goToLogin();
+        return;
+      }
+      if (!resp.ok) throw new Error('status ' + resp.status);
+      const body = await resp.json();
+      selfInfo = Object.assign({}, selfInfo, body);
+      try {
+        if (customName) localStorage.setItem(CUSTOM_NAME_KEY, customName);
+        else localStorage.removeItem(CUSTOM_NAME_KEY);
+      } catch (e) {}
+      renderSelf();
+    } catch (e) {
+      clientLog('error', '[peers] renameSelf failed: ' + (e && e.message));
+      if (window.LTR.p2p && window.LTR.p2p.toast) {
+        window.LTR.p2p.toast('Nom impossible à mettre à jour', 'warning');
+      }
+    }
   }
 
   function onCardClicked(deviceId) {
@@ -97,11 +147,18 @@
       onFilesPicked(pickerInputEl.files);
       pickerInputEl.value = '';
     });
+    const edit = $('#self-peer-edit');
+    if (edit) edit.addEventListener('click', renameSelf);
     clientLog('info', '[peers] init OK');
   }
 
   function setPeers(list) {
     peers = Array.isArray(list) ? list : [];
+    render();
+  }
+
+  function setSelf(info) {
+    selfInfo = info || null;
     render();
   }
 
@@ -119,5 +176,5 @@
   function onPeerClicked(cb) { onPeerClickedCb = cb; }
 
   window.LTR = window.LTR || {};
-  window.LTR.peers = { init, setPeers, getPeer, getAll, onPeerClicked };
+  window.LTR.peers = { init, setPeers, setSelf, getPeer, getAll, onPeerClicked };
 })();

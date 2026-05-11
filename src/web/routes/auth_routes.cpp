@@ -105,11 +105,13 @@ void registerAuth(WebService& svc) {
                                      httplib::Response& res) {
         std::string providedPin;
         std::string deviceId;
+        std::string customName;
         bool remember = false;
         try {
             const auto body = nlohmann::json::parse(req.body);
             providedPin = body.value("pin", "");
             deviceId    = body.value("device_id", "");
+            customName  = body.value("custom_name", "");
             remember    = body.value("remember", false);
         } catch (...) {
             res.status = 400;
@@ -127,7 +129,7 @@ void registerAuth(WebService& svc) {
 
         const auto ua = req.get_header_value("User-Agent");
         auto tokenOpt = svc.sessions().authenticate(
-            providedPin, svc.accessPinRef(), deviceId, ua);
+            providedPin, svc.accessPinRef(), deviceId, ua, customName);
 
         if (!tokenOpt) {
             res.status = 401;
@@ -272,8 +274,48 @@ void registerAuth(WebService& svc) {
         // plateforme. Permet au JS de s'afficher lui-même de manière
         // cohérente avec la liste des autres peers.
         j["displayName"]   = sess->displayName;
+        j["customName"]    = sess->customName;
         j["emoji"]         = sess->emoji;
         j["platformLabel"] = sess->platformLabel;
+        res.set_content(j.dump(), "application/json");
+    });
+
+    // POST /api/me/name { custom_name } — met à jour l'alias du navigateur.
+    server.Post("/api/me/name", [&svc](const httplib::Request& req,
+                                        httplib::Response& res) {
+        const auto token = readTokenCookie(req);
+        auto sess = svc.sessions().validate(token);
+        if (!sess) {
+            res.status = 401;
+            res.set_content("{\"error\":\"unauth\"}", "application/json");
+            return;
+        }
+        std::string customName;
+        try {
+            const auto body = nlohmann::json::parse(req.body);
+            customName = body.value("custom_name", "");
+        } catch (...) {
+            res.status = 400;
+            res.set_content("{\"error\":\"bad_json\"}", "application/json");
+            return;
+        }
+        if (!svc.sessions().updateCustomName(token, customName)) {
+            res.status = 404;
+            res.set_content("{\"error\":\"session_not_found\"}", "application/json");
+            return;
+        }
+        svc.sessions().touch(token);
+        svc.emitWebPeersToAll();
+
+        sess = svc.sessions().validate(token);
+        nlohmann::json j;
+        j["ok"] = true;
+        if (sess) {
+            j["displayName"] = sess->displayName;
+            j["customName"] = sess->customName;
+            j["emoji"] = sess->emoji;
+            j["platformLabel"] = sess->platformLabel;
+        }
         res.set_content(j.dump(), "application/json");
     });
 }

@@ -10,6 +10,7 @@
   const $$ = (s) => Array.from(document.querySelectorAll(s));
   const params = new URLSearchParams(window.location.search);
   const signedOut = params.get('signed_out') === '1';
+  const CUSTOM_NAME_KEY = 'ltr_custom_name';
 
   // ---------- device_id stable (localStorage) ----------
   function uuidv4() {
@@ -46,6 +47,12 @@
     .then((r) => r.json())
     .then((info) => { $('#host-name').textContent = info.name || 'cet appareil'; })
     .catch(() => { /* ignore */ });
+
+  const customNameInput = $('#custom-name');
+  if (customNameInput) {
+    try { customNameInput.value = localStorage.getItem(CUSTOM_NAME_KEY) || ''; }
+    catch (e) {}
+  }
 
   if (!signedOut && window.LTR.tryRefreshSession) {
     window.LTR.tryRefreshSession().then((ok) => {
@@ -216,6 +223,11 @@
     const device_id = getDeviceId();
     const remember = !!($('#opt-remember') && $('#opt-remember').checked);
     const rememberPin = !!(optPin && optPin.checked && !optPin.disabled);
+    const customName = customNameInput ? customNameInput.value.trim() : '';
+    try {
+      if (customName) localStorage.setItem(CUSTOM_NAME_KEY, customName);
+      else localStorage.removeItem(CUSTOM_NAME_KEY);
+    } catch (e) {}
     clientLog('info', 'submit POST /api/auth device_id='
                 + device_id.substring(0, 8)
                 + ' remember=' + remember + ' rememberPin=' + rememberPin);
@@ -225,7 +237,12 @@
       resp = await fetch('/api/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin, device_id, remember }),
+        body: JSON.stringify({
+          pin,
+          device_id,
+          remember,
+          custom_name: customName,
+        }),
         credentials: 'same-origin',
       });
     } catch (e) {

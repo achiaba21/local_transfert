@@ -27,6 +27,7 @@ struct WebSession {
     // de domain::Device::name (qui reste piloté par makeDeviceName pour
     // la rétrocompat desktop).
     std::string displayName;    // ex. "Pingouin Bleu"
+    std::string customName;     // ex. "Serge" -> display "Pingouin Bleu (Serge)"
     std::string emoji;          // ex. "🐧"
     std::string platformLabel;  // ex. "iPhone · Safari"
 };

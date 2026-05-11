@@ -61,6 +61,25 @@ std::string makeDeviceName(const ParsedAgent& pa,
          + (suffix.empty() ? "" : (" · " + suffix));
 }
 
+std::string cleanCustomName(const std::string& raw) {
+    std::string out;
+    out.reserve(raw.size());
+    for (unsigned char c : raw) {
+        if (c < 0x20 || c == 0x7f) continue;
+        out.push_back(static_cast<char>(c));
+        if (out.size() >= 32) break;
+    }
+    while (!out.empty() && out.front() == ' ') out.erase(out.begin());
+    while (!out.empty() && out.back() == ' ') out.pop_back();
+    return out;
+}
+
+std::string composeDisplayName(const std::string& autoName,
+                               const std::string& customName) {
+    if (customName.empty()) return autoName;
+    return autoName + " (" + customName + ")";
+}
+
 std::string makeToken() {
     static thread_local std::mt19937_64 rng{std::random_device{}()};
     std::string token;
@@ -80,7 +99,8 @@ std::optional<std::string> WebSessionStore::authenticate(
     const std::string& providedPin,
     const std::string& expectedPin,
     const std::string& deviceId,
-    const std::string& userAgent) {
+    const std::string& userAgent,
+    const std::string& customName) {
 
     if (expectedPin.empty() || providedPin != expectedPin) return std::nullopt;
     if (deviceId.empty()) return std::nullopt;
@@ -88,6 +108,8 @@ std::optional<std::string> WebSessionStore::authenticate(
     const auto token = makeToken();
     const auto pa = parseUserAgent(userAgent);
     const auto dn = DisplayName::fromDeviceIdAndUA(deviceId, userAgent);
+    const auto cleanedCustom = cleanCustomName(customName);
+    std::string storedCustom = cleanedCustom;
 
     WebSession sess;
     sess.token     = token;
@@ -102,13 +124,21 @@ std::optional<std::string> WebSessionStore::authenticate(
     sess.device.sessionToken = token;              // éphémère
     sess.device.lastSeen     = sess.lastSeen;
 
-    // V1.2 — Sprint Web P2P : auto-générés, stables (hash deviceId).
-    sess.displayName    = dn.name;
-    sess.emoji          = dn.emoji;
-    sess.platformLabel  = dn.platformLabel;
-
     {
         std::lock_guard<std::mutex> lock(mu_);
+        if (!cleanedCustom.empty()) {
+            customNames_[deviceId] = cleanedCustom;
+        } else {
+            const auto ci = customNames_.find(deviceId);
+            if (ci != customNames_.end()) storedCustom = ci->second;
+        }
+
+        // V1.2 — Sprint Web P2P : auto-générés, stables (hash deviceId).
+        sess.customName     = storedCustom;
+        sess.displayName    = composeDisplayName(dn.name, storedCustom);
+        sess.emoji          = dn.emoji;
+        sess.platformLabel  = dn.platformLabel;
+
         // Si ce device avait déjà une session active, l'invalider.
         const auto it = deviceToToken_.find(deviceId);
         if (it != deviceToToken_.end()) {
@@ -118,6 +148,22 @@ std::optional<std::string> WebSessionStore::authenticate(
         sessions_.emplace(token, std::move(sess));
     }
     return token;
+}
+
+bool WebSessionStore::updateCustomName(const std::string& token,
+                                       const std::string& customName) {
+    const auto cleaned = cleanCustomName(customName);
+    std::lock_guard<std::mutex> lock(mu_);
+    const auto it = sessions_.find(token);
+    if (it == sessions_.end()) return false;
+    if (cleaned.empty()) customNames_.erase(it->second.deviceId);
+    else customNames_[it->second.deviceId] = cleaned;
+
+    const auto dn = DisplayName::fromDeviceIdAndUA(
+        it->second.deviceId, it->second.userAgent);
+    it->second.customName = cleaned;
+    it->second.displayName = composeDisplayName(dn.name, cleaned);
+    return true;
 }
 
 std::optional<WebSession> WebSessionStore::validate(

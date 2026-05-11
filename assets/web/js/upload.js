@@ -392,7 +392,7 @@
       ${thumbHtml}
       <span class="f-name">${escapeHtml(rel)}</span>
       <span class="f-size" data-role="progress">${formatBytes(file.size)}</span>
-      <button type="button" class="btn btn-secondary send-to-btn">Envoyer \xC3\xA0 \u25BE</button>
+      <button type="button" class="btn btn-secondary send-to-btn">Envoyer à ▾</button>
       <button type="button" class="btn-ghost remove-btn" aria-label="Retirer" title="Retirer">\u2715</button>
       <div class="send-menu" hidden role="menu"></div>`;
     if (thumbUrl) li.dataset.thumbUrl = thumbUrl;
@@ -411,7 +411,7 @@
       <span class="f-icon">📁</span>
       <span class="f-name">${escapeHtml(bundle.rootName)}</span>
       <span class="f-size" data-role="progress">${bundle.files.length} fichier${bundle.files.length > 1 ? 's' : ''} · ${formatBytes(bundle.totalSize)}</span>
-      <button type="button" class="btn btn-secondary send-to-btn">Envoyer \xC3\xA0 \u25BE</button>
+      <button type="button" class="btn btn-secondary send-to-btn">Envoyer à ▾</button>
       <button type="button" class="btn-ghost remove-btn" aria-label="Retirer" title="Retirer">\u2715</button>
       <div class="send-menu" hidden role="menu"></div>`;
     li.querySelector('.send-to-btn').addEventListener('click', () =>
@@ -446,7 +446,7 @@
     const peers = (window.LTR.peers && window.LTR.peers.getAll
                    && window.LTR.peers.getAll()) || [];
     let html = '<button type="button" class="dest-btn" data-dest="host">'
-             + '\xF0\x9F\x96\xA5\xEF\xB8\x8F  Host</button>';
+             + '🖥️  Hôte</button>';
     for (const p of peers) {
       const safe = escapeHtml(p.displayName);
       html += `<button type="button" class="dest-btn" data-dest="${escapeHtml(p.deviceId)}">`
