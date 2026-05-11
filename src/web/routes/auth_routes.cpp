@@ -1,11 +1,13 @@
 #include "ltr/web/routes/auth_routes.hpp"
 
+#include <chrono>
 #include <random>
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
 #include "ltr/core/logger.hpp"
+#include "ltr/core/types.hpp"
 #include "ltr/web/routes/route_helpers.hpp"
 #include "ltr/web/web_service.hpp"
 #include "ltr/web/routes/multi_server.hpp"
@@ -95,16 +97,20 @@ void registerAuth(WebService& svc) {
         res.status = 204;
     });
 
-    // POST /api/auth { pin, device_id } — vérifie le PIN, crée la session,
-    // redirige 302 vers / en succès. Retourne 401 JSON en échec.
+    // POST /api/auth { pin, device_id, remember? } — vérifie le PIN,
+    // crée la session. V1.6.5 : si remember=true, émet aussi un cookie
+    // persistent `ltr_remember` valide 30j permettant de recréer la
+    // session sans re-saisir le PIN au prochain accès.
     server.Post("/api/auth", [&svc](const httplib::Request& req,
                                      httplib::Response& res) {
         std::string providedPin;
         std::string deviceId;
+        bool remember = false;
         try {
             const auto body = nlohmann::json::parse(req.body);
             providedPin = body.value("pin", "");
             deviceId    = body.value("device_id", "");
+            remember    = body.value("remember", false);
         } catch (...) {
             res.status = 400;
             res.set_content("{\"error\":\"bad_json\"}", "application/json");
@@ -142,6 +148,30 @@ void registerAuth(WebService& svc) {
         res.set_header("Set-Cookie",
             "ltr_token=" + token + "; Path=/; HttpOnly; SameSite=Lax");
 
+        // V1.6.5 — Sprint Stabilité (Wave 3 item H) : cookie persistent
+        // `ltr_remember` HMAC. Valide 30 jours. Permet de recréer la
+        // session sans re-PIN après fermeture d'onglet ou redémarrage
+        // browser, tant que le PIN host n'a pas changé.
+        if (remember) {
+            const auto nowSec = std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            const auto exp = nowSec + std::chrono::duration_cast<std::chrono::seconds>(
+                core::kWebSessionRememberTtl).count();
+            const auto persistent = svc.sessions().makePersistentToken(
+                deviceId, svc.accessPinRef(), exp);
+            const auto maxAge = std::to_string(
+                std::chrono::duration_cast<std::chrono::seconds>(
+                    core::kWebSessionRememberTtl).count());
+            res.set_header("Set-Cookie",
+                "ltr_remember=" + persistent
+                + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + maxAge);
+            core::log_info("[auth] ltr_remember émis device=" + deviceId.substr(0, 8)
+                           + "... exp=+" + std::to_string(
+                               std::chrono::duration_cast<std::chrono::hours>(
+                                   core::kWebSessionRememberTtl).count())
+                           + "h");
+        }
+
         if (auto s = svc.sessions().validate(token)) {
             svc.bus().post(core::PeerSeenEvent{s->device});
         }
@@ -161,6 +191,60 @@ void registerAuth(WebService& svc) {
         j["next"] = "/";
         if (serverGenerated) j["device_id"] = deviceId;
         res.status = 200;
+        res.set_content(j.dump(), "application/json");
+    });
+
+    // V1.6.5 — Sprint Stabilité (Wave 3 item H).
+    // POST /api/auth/refresh — recrée une session active à partir d'un
+    // cookie persistent `ltr_remember` valide. Pas de body requis.
+    //   - 200 + Set-Cookie ltr_token + JSON {ok:true} si HMAC valide ET
+    //     PIN host inchangé.
+    //   - 401 sinon (le client doit rediriger vers /login).
+    server.Post("/api/auth/refresh", [&svc](const httplib::Request& req,
+                                              httplib::Response& res) {
+        const auto remember = readRememberCookie(req);
+        if (remember.empty()) {
+            res.status = 401;
+            res.set_content("{\"error\":\"no_remember\"}", "application/json");
+            return;
+        }
+        const auto deviceIdOpt = svc.sessions().verifyPersistentToken(
+            remember, svc.accessPinRef());
+        if (!deviceIdOpt) {
+            res.status = 401;
+            res.set_content("{\"error\":\"invalid_remember\"}", "application/json");
+            // V1.6.5 : invalide proactivement le cookie corrompu/expiré.
+            res.set_header("Set-Cookie",
+                "ltr_remember=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+            return;
+        }
+        const auto& deviceId = *deviceIdOpt;
+        const auto ua = req.get_header_value("User-Agent");
+
+        // PIN match implicite (vérifié par HMAC), donc on appelle
+        // authenticate avec le PIN actuel comme fourni.
+        auto tokenOpt = svc.sessions().authenticate(
+            svc.accessPinRef(), svc.accessPinRef(), deviceId, ua);
+        if (!tokenOpt) {
+            res.status = 500;
+            res.set_content("{\"error\":\"recreate_failed\"}", "application/json");
+            return;
+        }
+        const auto token = *tokenOpt;
+        core::log_info("[auth/refresh] device=" + deviceId.substr(0, 8)
+                       + "... → new token=" + token.substr(0, 8) + "...");
+
+        res.set_header("Set-Cookie",
+            "ltr_token=" + token + "; Path=/; HttpOnly; SameSite=Lax");
+
+        if (auto s = svc.sessions().validate(token)) {
+            svc.bus().post(core::PeerSeenEvent{s->device});
+        }
+        svc.emitWebPeersToAll();
+
+        nlohmann::json j;
+        j["ok"] = true;
+        j["device_id"] = deviceId;
         res.set_content(j.dump(), "application/json");
     });
 

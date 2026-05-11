@@ -10,7 +10,7 @@
 // ============================================================
 (function () {
   'use strict';
-  const { clientLog, goToLogin, detectPlatform } = window.LTR;
+  const { clientLog, goToLogin, detectPlatform, handle401Async } = window.LTR;
   const $ = (s) => document.querySelector(s);
 
   // SCRIPT LOADED probe — utile pour debug iOS Safari.
@@ -21,19 +21,32 @@
 
   const state = { hostInfo: null, visitorPlatform: detectPlatform() };
 
+  function profile() { return window.LTR.webProfile; }
+
+  function setSessionStatus(text, kind) {
+    const el = $('#session-status');
+    if (!el) return;
+    el.textContent = text;
+    el.dataset.state = kind || 'ok';
+  }
+
   async function boot() {
     clientLog('info', '[app] boot start');
+    setSessionStatus('Connexion…', 'warn');
     try {
+      if (profile()) await profile().hydrateFromIdb();
       const info = await fetch('/api/host-info').then((r) => r.json());
       state.hostInfo = info;
       $('#host-name').textContent = info.name || 'Host';
       clientLog('info', '[app] host-info OK: ' + info.name);
 
-      const me = await fetch('/api/me', { credentials: 'same-origin' });
-      clientLog('info', '[app] /api/me status=' + me.status);
-      if (!me.ok) { goToLogin(); return; }
+      const me = await fetchMeWithRefresh();
+      if (!me) return;
+      setSessionStatus(me.restored ? 'Session restaurée' : 'Connecté', 'ok');
+      setTimeout(() => setSessionStatus('Connecté', 'ok'), 2500);
 
       setupLogout();
+      if (window.LTR.initShare) window.LTR.initShare();
       setupInstallBanner();
       startHeartbeat();
 
@@ -69,8 +82,24 @@
       }
     } catch (e) {
       clientLog('error', '[app] boot threw: ' + (e && e.message));
+      setSessionStatus('Session expirée', 'error');
       goToLogin();
     }
+  }
+
+  async function fetchMeWithRefresh() {
+    let me = await fetch('/api/me', { credentials: 'same-origin' });
+    clientLog('info', '[app] /api/me status=' + me.status);
+    if (me.ok) return { ...(await me.json()), restored: false };
+    const auth = await handle401Async(me);
+    if (auth === 'retry') {
+      setSessionStatus('Session restaurée', 'ok');
+      me = await fetch('/api/me', { credentials: 'same-origin' });
+      clientLog('info', '[app] /api/me retry status=' + me.status);
+      if (me.ok) return { ...(await me.json()), restored: true };
+    }
+    setSessionStatus('Session expirée', 'error');
+    return null;
   }
 
   // ==================== TX TABS (V1.3) ====================
@@ -88,25 +117,42 @@
       tabP2p .setAttribute('aria-selected', String(!isHost));
       paneHost.hidden = !isHost;
       paneP2p .hidden =  isHost;
+      if (profile()) profile().set('ui.activeTxTab', which);
     }
     tabHost.addEventListener('click', () => activate('host'));
     tabP2p .addEventListener('click', () => activate('p2p'));
+    activate(profile() ? profile().get('ui.activeTxTab', 'host') : 'host');
   }
 
   // ==================== LOGOUT ====================
   function setupLogout() {
     $('#logout-btn').addEventListener('click', async () => {
+      await closeSession(false);
+      window.location.href = '/login?signed_out=1';
+    });
+    $('#forget-device-btn')?.addEventListener('click', async () => {
+      const ok = confirm("Oublier cet appareil ? Le PIN mémorisé et la connexion automatique seront supprimés.");
+      if (!ok) return;
+      await closeSession(true);
+      window.location.href = '/login?signed_out=1';
+    });
+  }
+
+  async function closeSession(forget) {
+    setSessionStatus(forget ? 'Appareil oublié…' : 'Déconnexion…', 'warn');
       // V1.2 — Sprint Web P2P : ferme proprement les RTCPeerConnection
       // avant logout pour éviter les half-open connections.
       if (window.LTR.p2p && window.LTR.p2p.cleanupAll) {
         window.LTR.p2p.cleanupAll();
       }
       try {
-        await fetch('/api/logout',
+        await fetch('/api/logout' + (forget ? '?forget=1' : ''),
           { method: 'POST', credentials: 'same-origin' });
       } catch (e) { /* ignore */ }
-      goToLogin();
-    });
+      if (forget) {
+        if (window.LTR.pinStorage) window.LTR.pinStorage.clearPin();
+        if (profile()) profile().clearLocalIdentity();
+      }
   }
 
   // ==================== INSTALL BANNER ====================
@@ -115,12 +161,15 @@
   // cross-OS « Voir sur GitHub » est désactivé tant qu'il n'y a pas de
   // releases publiées (cf. multi-os-installer/ANALYSIS.md).
   function setupInstallBanner() {
-    try {
-      if (sessionStorage.getItem('install-closed') === '1') return;
-    } catch (e) {}
+    if (profile() && profile().get('ui.installClosed', false)) return;
+
+    // V1.6.5+ : pas de bandeau sur mobile — `/download/self` sert un
+    // binaire desktop (.app/.exe/ELF) inutilisable sur iOS/Android.
+    const vp = state.visitorPlatform;
+    if (vp === 'iOS' || vp === 'Android') return;
 
     const hostPlatform = state.hostInfo && state.hostInfo.platform;
-    const same = hostPlatform === state.visitorPlatform;
+    const same = hostPlatform === vp;
     if (!same) return;  // pas de banner cross-OS V1
 
     const banner = $('#install-banner');
@@ -138,7 +187,7 @@
 
     $('#install-close').addEventListener('click', () => {
       banner.hidden = true;
-      try { sessionStorage.setItem('install-closed', '1'); } catch (e) {}
+      if (profile()) profile().set('ui.installClosed', true);
     });
   }
 
@@ -151,7 +200,11 @@
         credentials: 'same-origin',
         keepalive: true,
       });
-      if (resp.status === 401) goToLogin();
+      if (resp.status === 401) {
+        setSessionStatus('Reconnexion…', 'warn');
+        const auth = await handle401Async(resp);
+        if (auth === 'retry') setSessionStatus('Session restaurée', 'ok');
+      }
     } catch (e) { /* transient */ }
   }
 

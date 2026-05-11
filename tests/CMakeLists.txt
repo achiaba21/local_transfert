@@ -64,6 +64,31 @@ add_executable(test_resume_sidecar test_resume_sidecar.cpp)
 target_link_libraries(test_resume_sidecar PRIVATE ltr_core)
 add_test(NAME resume_sidecar COMMAND test_resume_sidecar)
 
+# V1.6.4 — Sprint Sécurité (Wave 2 TOFU TCP) : registre known_peers.json.
+add_executable(test_known_peers test_known_peers.cpp)
+target_link_libraries(test_known_peers PRIVATE ltr_core)
+add_test(NAME known_peers COMMAND test_known_peers)
+
+# V1.6.5 — Sprint Stabilité (Wave 1, item D) : parsing Range RFC 7233.
+add_executable(test_range_parser test_range_parser.cpp)
+target_link_libraries(test_range_parser PRIVATE ltr_core)
+add_test(NAME range_parser COMMAND test_range_parser)
+
+# V1.6.5 — Sprint Stabilité (Wave 3 item H) : tokens persistents HMAC.
+add_executable(test_persistent_token test_persistent_token.cpp)
+target_link_libraries(test_persistent_token PRIVATE ltr_core)
+add_test(NAME persistent_token COMMAND test_persistent_token)
+
+# V1.6.5 — Sprint Stabilité (Wave 4 item J) : historique des pairs.
+add_executable(test_peers_history test_peers_history.cpp)
+target_link_libraries(test_peers_history PRIVATE ltr_core)
+add_test(NAME peers_history COMMAND test_peers_history)
+
+# V1.6.5 — Sprint Stabilité (Wave 4 item K) : historique des transferts.
+add_executable(test_transfer_history test_transfer_history.cpp)
+target_link_libraries(test_transfer_history PRIVATE ltr_core)
+add_test(NAME transfer_history COMMAND test_transfer_history)
+
 # V1.1.10 — Sprint UI Layout System : DSL HBox/VBox + breakpoints + cache.
 add_executable(test_layout_box test_layout_box.cpp)
 target_link_libraries(test_layout_box PRIVATE ltr_ui)

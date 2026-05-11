@@ -13,10 +13,22 @@
   <span class="brand-dot" aria-hidden="true"></span>
   <h1 class="brand">LocalTransfer</h1>
   <span class="host-pill" id="host-name" aria-label="Appareil hôte">…</span>
+  <span class="session-pill" id="session-status" role="status"
+        aria-live="polite">Connexion…</span>
+  <button class="header-action-btn" id="share-access-btn"
+          aria-label="Partager l'accès" title="Partager l'accès">
+    <span class="header-action-icon" aria-hidden="true">QR</span>
+    <span class="header-action-label">Partager</span>
+  </button>
   <button class="logout-btn" id="logout-btn"
           aria-label="Se déconnecter" title="Se déconnecter">
     <span class="logout-icon" aria-hidden="true">⎋</span>
     <span class="logout-label">Se déconnecter</span>
+  </button>
+  <button class="logout-btn forget-btn" id="forget-device-btn"
+          aria-label="Oublier cet appareil" title="Oublier cet appareil">
+    <span class="logout-icon" aria-hidden="true">×</span>
+    <span class="logout-label">Oublier</span>
   </button>
 </header>
 
@@ -150,11 +162,56 @@
 <div class="p2p-toast" id="p2p-toast" hidden role="status"
      aria-live="polite"></div>
 
+<div class="share-modal" id="share-modal" hidden role="dialog"
+     aria-labelledby="share-title" aria-modal="true">
+  <button class="share-backdrop" id="share-backdrop" type="button"
+          aria-label="Fermer"></button>
+  <section class="share-sheet">
+    <div class="share-sheet-head">
+      <div>
+        <h2 id="share-title">Partager l'accès</h2>
+        <p>Ce QR donne accès à cet appareil.</p>
+      </div>
+      <button type="button" class="btn-ghost share-close"
+              id="share-close" aria-label="Fermer">×</button>
+    </div>
+    <div class="share-qr-wrap">
+      <img id="share-qr-img" alt="QR code de connexion" width="260" height="260">
+    </div>
+    <dl class="share-fields">
+      <div>
+        <dt>Lien</dt>
+        <dd id="share-url">…</dd>
+      </div>
+      <div>
+        <dt>PIN</dt>
+        <dd id="share-pin">…</dd>
+      </div>
+      <div id="share-fingerprint-row" hidden>
+        <dt>Empreinte HTTPS</dt>
+        <dd id="share-fingerprint">…</dd>
+      </div>
+    </dl>
+    <div class="share-actions">
+      <button type="button" class="btn btn-primary" id="share-copy-link">
+        Copier le lien
+      </button>
+      <button type="button" class="btn btn-secondary" id="share-copy-pin">
+        Copier le PIN
+      </button>
+    </div>
+    <p class="share-status" id="share-status" role="status" aria-live="polite"></p>
+  </section>
+</div>
+
 <!-- Ordre de chargement : common.js (utilitaires) d'abord, puis modules,
      puis app.js qui orchestre. Tous en defer pour conserver l'ordre. -->
 <script src="/common.js"   defer></script>
+<script src="/idb.js"               defer></script>
+<script src="/web_profile.js"       defer></script>
 <script src="/upload.js"   defer></script>
 <script src="/download.js" defer></script>
+<script src="/share.js"             defer></script>
 <script src="/peers.js"             defer></script>
 <script src="/transfer_registry.js" defer></script>
 <script src="/p2p_transport.js"     defer></script>

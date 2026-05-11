@@ -13,6 +13,9 @@
 #include "ltr/app/app_state.hpp"
 #include "ltr/core/event_bus.hpp"
 #include "ltr/infra/config.hpp"
+#include "ltr/infra/known_peers.hpp"
+#include "ltr/infra/peers_history.hpp"      // V1.6.5 — Wave 4 item J
+#include "ltr/infra/transfer_history.hpp"   // V1.6.5 — Wave 4 item K
 #include "ltr/network/discovery_service.hpp"
 #include "ltr/network/transfer_client.hpp"
 #include "ltr/network/transfer_server.hpp"
@@ -113,6 +116,9 @@ public:
         std::string url;   // "http://192.168.1.42:45456" ou vide si down
         std::string pin;   // "472931"
         std::uint16_t port{0};
+        // V1.6.4 — Sprint Sécurité : empreinte SHA-256 du cert HTTPS,
+        // format "AB:CD:EF:..." (32 octets). Vide si HTTPS désactivé.
+        std::string fingerprint;
     };
     WebShareInfo webShareInfo() const;
 
@@ -128,6 +134,22 @@ private:
     std::unique_ptr<network::TransferServer>   server_;
     std::unique_ptr<network::TransferClient>   client_;
     std::unique_ptr<web::WebService>           web_;
+
+    // V1.6.4 — Sprint Sécurité (Wave 2 TOFU TCP).
+    std::string                                selfFingerprint_;
+    std::unique_ptr<infra::KnownPeers>         knownPeers_;
+
+    // V1.6.5 — Sprint Stabilité (Wave 4 items J + K).
+    std::unique_ptr<infra::PeersHistory>       peersHistory_;
+    std::unique_ptr<infra::TransferHistory>    transferHistory_;
+    // Cache totalBytes par sessionId pour calculer le delta sur Done/Failed.
+    std::unordered_map<std::string, std::uint64_t> sessionBytes_;
+
+public:
+    // V1.6.5 — accès lecture seule pour HistoryScreen + sidebar.
+    infra::PeersHistory*    peersHistory()    { return peersHistory_.get(); }
+    infra::TransferHistory* transferHistory() { return transferHistory_.get(); }
+private:
 
     std::string currentPinCode_; // PIN actif pour l'offre sortante
 

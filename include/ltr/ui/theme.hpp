@@ -54,6 +54,13 @@ namespace Radius {
 }
 
 // Chargement paresseux de la police (depuis assets ou système).
+// V1.6.6+ : Geist Regular copiée dans le dossier de build ; fallback
+// Inter puis système si elle manque.
 const sf::Font& theme_font();
+
+// V1.6.6+ : Geist Bold (vraie variante grasse, pas le fake-bold SFML
+// synthétique). Les widgets qui appellent setBold(true) chargent cette police
+// séparée pour un rendu plus net.
+const sf::Font& theme_font_bold();
 
 } // namespace ltr::ui

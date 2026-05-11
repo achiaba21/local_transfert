@@ -49,8 +49,8 @@ using core::formatEta;
 
 MainScreen::MainScreen(app::AppController& controller)
     : controller_(controller) {
-    // V1.1.8-UX1 : bouton unique « Ajouter ▾ » + menu déroulant à 2 items.
-    addBtn_.setLabel("Ajouter  \xE2\x96\xBE")  // UTF-8 ▾ (U+25BE)
+    // V1.1.8-UX1 : bouton unique Ajouter + menu déroulant.
+    addBtn_.setLabel("Ajouter")
         .setVariant(Button::Variant::Secondary)
         .onClick([this]{
             addMenu_.setAnchor(addBtn_.bounds()).openMenu();
@@ -63,10 +63,10 @@ MainScreen::MainScreen(app::AppController& controller)
         // ⌘V/Ctrl+V est documenté dans le tooltip / docs (le
         // DropdownMenu actuel n'affiche pas de hint à droite).
 #if defined(__APPLE__)
-        {"\xF0\x9F\x93\x8B  Coller (\xE2\x8C\x98V)",
+        {"Coller (Cmd+V)",
          [this]{ controller_.pasteFromClipboard(); }},
 #else
-        {"\xF0\x9F\x93\x8B  Coller (Ctrl+V)",
+        {"Coller (Ctrl+V)",
          [this]{ controller_.pasteFromClipboard(); }},
 #endif
     });
@@ -394,7 +394,7 @@ void MainScreen::handleEvent(const sf::Event& e, const app::AppState& state) {
 
 void MainScreen::update(const app::AppState& state, sf::Time dt) {
     sendBtn_.setEnabled(controller_.canSend());
-    rescanBtn_.setLabel(controller_.isScanning() ? "Scan…" : "Rescanner");
+    rescanBtn_.setLabel(controller_.isScanning() ? "Scan..." : "Rescanner");
 
     // V1.1.8-UX1 : tick pour l'animation radar.
     emptyElapsed_ += dt.asSeconds();
@@ -413,6 +413,11 @@ void MainScreen::update(const app::AppState& state, sf::Time dt) {
     if (info.pin != lastSharePinApplied_) {
         sharePanel_.setPin(info.pin);
         lastSharePinApplied_ = info.pin;
+    }
+    // V1.6.4 — Sprint Sécurité : sync de l'empreinte SHA-256 du cert HTTPS.
+    if (info.fingerprint != lastShareFpApplied_) {
+        sharePanel_.setFingerprint(info.fingerprint);
+        lastShareFpApplied_ = info.fingerprint;
     }
 
     // V1.1.8-UX4 : visitor count (pairs kind==Web) + collapsed state sync.
@@ -715,7 +720,7 @@ void MainScreen::drawCenter(sf::RenderTarget& target) const {
         empty.draw(target);
 
         Label hint;
-        hint.setText("Cliquez sur « Ajouter » pour choisir des fichiers ou un dossier")
+        hint.setText("Cliquez sur Ajouter pour choisir des fichiers ou un dossier")
             .setSize(FontSize::small)
             .setColor(Colors::textSecondary);
         const auto hm = hint.measure();
@@ -1057,7 +1062,7 @@ void MainScreen::drawTransferBar(sf::RenderTarget& target) const {
         switch (t.status) {
             case domain::TransferStatus::Done: {
                 Label done;
-                done.setText("\xE2\x9C\x93 Termin\xC3\xA9")  // ✓ Terminé
+                done.setText("Termin\xC3\xA9")
                     .setSize(FontSize::body).setBold(true)
                     .setColor(Colors::success)
                     .setPosition(r.left + Spacing::md, l2Y);
@@ -1111,7 +1116,7 @@ void MainScreen::drawTransferBar(sf::RenderTarget& target) const {
             }
             case domain::TransferStatus::Proposed: {
                 Label f;
-                f.setText("En attente du visiteur\xE2\x80\xA6") // …
+                f.setText("En attente du visiteur...")
                  .setSize(FontSize::small)
                  .setColor(Colors::warning)
                  .setPosition(r.left + Spacing::md, l2Y);

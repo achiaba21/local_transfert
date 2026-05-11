@@ -13,11 +13,17 @@
 #include "ltr/domain/device.hpp"
 #include "ltr/domain/file_meta.hpp"
 
+namespace ltr::infra { class KnownPeers; }
+
 namespace ltr::network {
 
 class TransferClient {
 public:
-    explicit TransferClient(core::EventBus& bus, domain::Device self);
+    // V1.6.4 — `knownPeers` (optionnel) active la vérification TOFU sur
+    // l'empreinte reçue dans le message Accept. Peut être nullptr (HTTP
+    // tests, contexte sans config dir, etc.) → pas de vérification.
+    explicit TransferClient(core::EventBus& bus, domain::Device self,
+                            infra::KnownPeers* knownPeers = nullptr);
     ~TransferClient();
 
     TransferClient(const TransferClient&)            = delete;
@@ -54,6 +60,7 @@ private:
 
     core::EventBus& bus_;
     domain::Device self_;
+    infra::KnownPeers* knownPeers_{nullptr};  // V1.6.4 — TOFU TCP
 
     std::mutex mu_;
     std::unordered_map<std::string, std::shared_ptr<WorkerCtx>> workers_;

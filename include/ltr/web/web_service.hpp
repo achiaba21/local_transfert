@@ -79,6 +79,13 @@ public:
     std::shared_ptr<std::atomic<bool>>
     acquireCancelFlag(const std::string& sessionId);
 
+    // V1.6.5 — Sprint Stabilité (Wave 1, item B).
+    // Retire l'entrée `sessionId` de cancelFlags_ après que le content
+    // provider du download a terminé (succès, cancel ou erreur). Le
+    // shared_ptr reste vivant pour les références encore actives, mais
+    // la map est libérée (corrige le leak audit V1.6.4).
+    void releaseCancelFlag(const std::string& sessionId);
+
     // V1.2 — Sprint Web P2P : pousse l'évènement SSE `web-peers` vers
     // une session spécifique (la liste des AUTRES sessions actives, hors
     // celle pointée par `token`). Utilisé après auth/logout/eviction.

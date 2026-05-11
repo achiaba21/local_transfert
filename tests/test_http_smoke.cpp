@@ -10,6 +10,7 @@
 
 #include <cassert>
 #include <chrono>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <thread>
@@ -39,6 +40,7 @@ int main() {
     cli.set_follow_location(false); // V1.1 : on veut voir le 302
 
     const std::string kDeviceId = "test-device-uuid";
+    std::string authCookie;
 
     // 1) GET /api/host-info → 200 JSON
     {
@@ -72,6 +74,10 @@ int main() {
         assert(res->status == 200);
         const auto cookie = res->get_header_value("Set-Cookie");
         assert(cookie.find("ltr_token=") != std::string::npos);
+        const std::string prefix = "ltr_token=";
+        const auto start = cookie.find(prefix) + prefix.size();
+        const auto end = cookie.find(';', start);
+        authCookie = cookie.substr(start, end - start);
         auto j = nlohmann::json::parse(res->body);
         assert(j["ok"] == true);
         assert(j["next"] == "/");
@@ -92,6 +98,36 @@ int main() {
         assert(res);
         assert(res->status == 200);
         assert(res->body.find("Se connecter") != std::string::npos);
+    }
+
+    // 6) Routes share protégées : sans cookie → 401
+    {
+        auto res = cli.Get("/api/share-info");
+        assert(res);
+        assert(res->status == 401);
+    }
+
+    // 7) Routes share avec cookie → JSON + QR PNG
+    {
+        httplib::Headers h{{"Cookie", "ltr_token=" + authCookie}};
+        auto infoRes = cli.Get("/api/share-info", h);
+        assert(infoRes);
+        assert(infoRes->status == 200);
+        auto j = nlohmann::json::parse(infoRes->body);
+        assert(j["pin"] == svc.accessPin());
+        const std::string loginUrl = j["loginUrl"];
+        assert(loginUrl.find("/login?pin=" + svc.accessPin())
+               != std::string::npos);
+
+        auto qrRes = cli.Get("/api/share-qr.png", h);
+        assert(qrRes);
+        assert(qrRes->status == 200);
+        assert(qrRes->get_header_value("Content-Type").find("image/png")
+               != std::string::npos);
+        static const unsigned char sig[8] =
+            {137, 80, 78, 71, 13, 10, 26, 10};
+        assert(qrRes->body.size() > sizeof(sig));
+        assert(std::memcmp(qrRes->body.data(), sig, sizeof(sig)) == 0);
     }
 
     svc.stop();

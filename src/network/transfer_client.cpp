@@ -4,6 +4,7 @@
 #include "ltr/core/types.hpp"
 #include "ltr/domain/transfer_session.hpp"
 #include "ltr/infra/filesystem_service.hpp"
+#include "ltr/infra/known_peers.hpp"   // V1.6.4 — TOFU TCP
 #include "ltr/network/protocol.hpp"
 
 #include <algorithm>
@@ -35,8 +36,9 @@ std::string generateSessionId() {
 
 } // namespace
 
-TransferClient::TransferClient(core::EventBus& bus, domain::Device self)
-    : bus_(bus), self_(std::move(self)) {}
+TransferClient::TransferClient(core::EventBus& bus, domain::Device self,
+                               infra::KnownPeers* knownPeers)
+    : bus_(bus), self_(std::move(self)), knownPeers_(knownPeers) {}
 
 TransferClient::~TransferClient() {
     // Signale l'annulation à tous les workers, puis les joint.
@@ -249,6 +251,40 @@ void TransferClient::runSender(
         cleanup();
         return;
     }
+
+    // V1.6.4 — Sprint Sécurité (Wave 2 TOFU TCP).
+    // L'Accept du receveur peut inclure son empreinte stable. On la
+    // vérifie contre known_peers.json :
+    //   - inconnue → set TOFU (silencieux)
+    //   - identique → OK
+    //   - différente → poste FingerprintChangedEvent (non-bloquant)
+    if (knownPeers_ && !peer.id.empty()) {
+        try {
+            const auto j = json::parse(resp.payload);
+            const auto fp = j.value("fingerprint", std::string{});
+            if (!fp.empty()) {
+                const auto previous = knownPeers_->get(peer.id);
+                const auto result = knownPeers_->set(peer.id, fp);
+                using SR = infra::KnownPeers::SetResult;
+                if (result == SR::New) {
+                    core::log_info("[tofu] nouveau pair " + peer.id.substr(0, 8)
+                                   + " fp=" + fp.substr(0, 23) + "...");
+                } else if (result == SR::Changed) {
+                    core::log_warn("[tofu] empreinte CHANGÉE pour pair "
+                                   + peer.id.substr(0, 8)
+                                   + " ancienne=" + (previous ? previous->substr(0, 23) : "?")
+                                   + "... nouvelle=" + fp.substr(0, 23) + "...");
+                    bus_.post(core::FingerprintChangedEvent{
+                        peer.id,
+                        previous.value_or(""),
+                        fp});
+                }
+            }
+        } catch (const std::exception& e) {
+            core::log_warn(std::string("[tofu] Accept parse error: ") + e.what());
+        }
+    }
+
     bus_.post(core::OfferAnsweredEvent{sessionId, true, ""});
 
     // Envoi des fichiers.

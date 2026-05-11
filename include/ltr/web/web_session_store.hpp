@@ -84,10 +84,41 @@ public:
     std::optional<std::string>
     findTokenByDeviceId(const std::string& deviceId) const;
 
+    // V1.6.5 — Sprint Stabilité (Wave 3 item H).
+    // Configure le secret HMAC utilisé pour signer/vérifier les tokens
+    // persistents. À appeler 1 fois au start, après le chargement du
+    // certificat HTTPS (le fingerprint sert de secret).
+    void setHmacSecret(std::string secret);
+
+    // Génère un token persistent signé HMAC SHA-256 :
+    //   "{deviceId}.{expEpochSeconds}.{pinHash8}.{HMAC_HEX}"
+    // pinHash8 = 8 premiers chars du SHA-256(pinClair) ; permet de
+    // détecter un changement de PIN host → HMAC invalide automatiquement.
+    std::string makePersistentToken(const std::string& deviceId,
+                                    const std::string& currentPin,
+                                    std::int64_t expEpochSeconds) const;
+
+    // Vérifie un token persistent reçu :
+    //   - format valide ?
+    //   - non expiré ?
+    //   - pinHash8 = SHA-256(currentPin) actuel ? (sinon PIN host a changé)
+    //   - HMAC valide ?
+    // Retourne le deviceId si tout OK, std::nullopt sinon.
+    std::optional<std::string>
+    verifyPersistentToken(const std::string& token,
+                          const std::string& currentPin) const;
+
 private:
+    // V1.6.5 — Helper SHA-256 hex puis truncation.
+    std::string pinHash8(const std::string& pin) const;
+    // HMAC-SHA-256 retourne hex string (64 chars).
+    std::string hmacSha256Hex(const std::string& key,
+                              const std::string& message) const;
+
     mutable std::mutex mu_;
     std::map<std::string, WebSession> sessions_;        // token → session
     std::map<std::string, std::string> deviceToToken_;  // deviceId → token
+    std::string hmacSecret_;                            // V1.6.5 Wave 3
 };
 
 } // namespace ltr::web

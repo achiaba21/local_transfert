@@ -25,17 +25,68 @@
 
   function goToLogin() { window.location.href = '/login'; }
 
+  // V1.6.5 — Sprint Stabilité (Wave 3 item H).
+  // Tente de recréer la session via le cookie persistent ltr_remember.
+  // Retourne true si succès (= caller peut retry sa requête initiale).
+  // Anti-boucle infinie : un seul refresh par hit 401, géré via flag.
+  let refreshInFlight = null;
+  async function tryRefreshSession() {
+    if (refreshInFlight) return refreshInFlight;
+    refreshInFlight = (async () => {
+      try {
+        const r = await fetch('/api/auth/refresh', {
+          method: 'POST',
+          credentials: 'same-origin',
+        });
+        return r.ok;
+      } catch {
+        return false;
+      } finally {
+        // Reset après un court délai pour permettre la prochaine tentative
+        // si la session re-expire plus tard.
+        setTimeout(() => { refreshInFlight = null; }, 5000);
+      }
+    })();
+    return refreshInFlight;
+  }
+
+  // V1.6.5 — handle401 amélioré : essaye d'abord ltr_remember puis seulement
+  // redirect /login en dernier recours. Retourne :
+  //   - true si redirection /login déclenchée (caller doit abort)
+  //   - false si pas un 401 (caller continue normalement)
+  //   - 'retry' si refresh OK (caller doit relancer la même requête)
+  async function handle401Async(resp) {
+    if (!resp || resp.status !== 401) return false;
+    const ok = await tryRefreshSession();
+    if (ok) {
+      clientLog('info', '[refresh] session recréée via ltr_remember');
+      return 'retry';
+    }
+    goToLogin();
+    return true;
+  }
+
   function handle401(resp) {
     if (resp && resp.status === 401) { goToLogin(); return true; }
     return false;
   }
 
   // Détecte la plateforme via User-Agent.
+  // V1.6.5+ : depuis iPadOS 13, Safari iPad envoie un UA "Macintosh"
+  // qui matche /Mac OS X/ et trompe la détection. On le distingue d'un
+  // vrai Mac via `navigator.maxTouchPoints > 1` (un Mac Desktop n'a pas
+  // d'écran tactile multi-points). Idem si l'utilisateur coche manuellement
+  // « Demander la version pour ordinateur » sur Safari iOS.
   function detectPlatform() {
     const ua = navigator.userAgent || '';
-    if (/iPhone|iPad|iOS/i.test(ua)) return 'iOS';
+    if (/iPhone|iPad|iPod|iOS/i.test(ua)) return 'iOS';
     if (/Android/i.test(ua)) return 'Android';
-    if (/Mac OS X|Macintosh/i.test(ua)) return 'macOS';
+    // Détection iPadOS Desktop Mode : UA dit Macintosh MAIS écran tactile.
+    if (/Mac OS X|Macintosh/i.test(ua)) {
+      const tp = (navigator.maxTouchPoints || 0);
+      if (tp > 1 && 'ontouchend' in document) return 'iOS';
+      return 'macOS';
+    }
     if (/Windows/i.test(ua)) return 'Windows';
     if (/Linux/i.test(ua)) return 'Linux';
     return 'Other';
@@ -76,7 +127,7 @@
   // Expose un namespace unique à toutes les autres modules.
   window.LTR = window.LTR || {};
   Object.assign(window.LTR, {
-    clientLog, goToLogin, handle401,
+    clientLog, goToLogin, handle401, handle401Async, tryRefreshSession,
     detectPlatform, supportsFolderPick,
     iconFor, formatBytes, escapeHtml,
   });

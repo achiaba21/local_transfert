@@ -19,12 +19,14 @@ TransferServer::TransferServer(core::EventBus& bus,
                                domain::Device self,
                                std::filesystem::path downloadDir,
                                std::uint16_t port,
-                               int resumeSidecarTtlHours)
+                               int resumeSidecarTtlHours,
+                               std::string selfFingerprint)
     : bus_(bus),
       self_(std::move(self)),
       downloadDir_(std::move(downloadDir)),
       port_(port),
-      resumeSidecarTtlHours_(resumeSidecarTtlHours) {}
+      resumeSidecarTtlHours_(resumeSidecarTtlHours),
+      selfFingerprint_(std::move(selfFingerprint)) {}
 
 TransferServer::~TransferServer() {
     stop();
@@ -237,8 +239,13 @@ void TransferServer::sessionWorker(std::unique_ptr<sf::TcpSocket> sock) {
         return;
     }
 
-    // Accepter.
+    // Accepter. V1.6.4 — Wave 2 TOFU : on inclut l'empreinte stable du
+    // host (peerId du receveur B) pour que l'émetteur A puisse vérifier
+    // qu'il s'agit bien du même host qu'à la dernière session.
     json okPayload = {{"sessionId", req.sessionId}};
+    if (!selfFingerprint_.empty()) {
+        okPayload["fingerprint"] = selfFingerprint_;
+    }
     if (writeJsonFrame(*ps->socket, MessageType::Accept, okPayload.dump())
         != sf::Socket::Done) return;
 

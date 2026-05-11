@@ -29,7 +29,8 @@ public:
                    domain::Device self,
                    std::filesystem::path downloadDir,
                    std::uint16_t port,
-                   int resumeSidecarTtlHours = 24);
+                   int resumeSidecarTtlHours = 24,
+                   std::string selfFingerprint = "");
     ~TransferServer();
 
     TransferServer(const TransferServer&)            = delete;
@@ -62,6 +63,7 @@ private:
     std::filesystem::path downloadDir_;
     std::uint16_t port_;
     int resumeSidecarTtlHours_{24};  // V1.1.9
+    std::string selfFingerprint_;    // V1.6.4 — empreinte stable inclue dans Accept
 
     std::atomic<bool> running_{false};
     sf::TcpListener listener_;

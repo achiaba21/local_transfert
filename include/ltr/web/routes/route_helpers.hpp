@@ -11,4 +11,8 @@ namespace ltr::web::routes {
 // les routes authentifiées pour éviter la duplication.
 std::string readTokenCookie(const httplib::Request& req);
 
+// V1.6.5 — Sprint Stabilité (Wave 3 item H).
+// Lit le cookie persistent `ltr_remember` (HMAC token 30j).
+std::string readRememberCookie(const httplib::Request& req);
+
 } // namespace ltr::web::routes

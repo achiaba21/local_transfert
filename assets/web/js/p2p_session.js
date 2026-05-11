@@ -15,8 +15,12 @@
 
   // V1.2.1 : 16 KB pour compat Safari (SCTP RFC 8831 default).
   const CHUNK_SIZE   = 16 * 1024;
+  const CHUNK_MIN    = 16 * 1024;
+  const CHUNK_MAX    = 64 * 1024;
   const BUFFER_HIGH  = 1 * 1024 * 1024;
   const BUFFER_LOW   = 256 * 1024;
+  const BUFFER_HIGH_MAX = 4 * 1024 * 1024;
+  const BUFFER_LOW_MIN  = 128 * 1024;
   // V1.3 — Robustesse
   const WATCHDOG_NO_DATA_MS = 10_000;
   const NO_ACK_TIMEOUT_MS   = 10_000;
@@ -28,6 +32,7 @@
                             && navigator.storage.getDirectory);
   const FALLBACK_CAP_BYTES = 1024 * 1024 * 1024;  // 1 Go cap si Blob
   const STORAGE_SAFETY_BYTES = 64 * 1024 * 1024;  // marge metadata/OPFS
+  const PENDING_TTL_MS = 24 * 60 * 60 * 1000;
   console.log('[p2p] V1.6.3 OPFS_AVAILABLE=', OPFS_AVAILABLE,
               ' navigator.storage=', !!navigator.storage,
               ' getDirectory=', !!(navigator.storage
@@ -42,6 +47,30 @@
     }
     return 'p2p-' + Date.now().toString(36)
       + '-' + Math.random().toString(36).slice(2, 10);
+  }
+
+  function stableFileId(file) {
+    const name = file && file.name ? file.name : 'file';
+    const size = file && typeof file.size === 'number' ? file.size : 0;
+    const modified = file && typeof file.lastModified === 'number'
+      ? file.lastModified : 0;
+    return `${size}:${modified}:${name}`;
+  }
+
+  function tuneFlow(state, dc) {
+    state.chunkSize = state.chunkSize || CHUNK_SIZE;
+    state.bufferHigh = state.bufferHigh || BUFFER_HIGH;
+    state.bufferLow = state.bufferLow || BUFFER_LOW;
+    if (!dc) return;
+    if (dc.bufferedAmount > state.bufferHigh * 0.8) {
+      state.chunkSize = Math.max(CHUNK_MIN, Math.floor(state.chunkSize / 2));
+      state.bufferHigh = Math.max(BUFFER_HIGH, Math.floor(state.bufferHigh * 0.85));
+    } else if (dc.bufferedAmount < state.bufferLow * 0.5) {
+      state.chunkSize = Math.min(CHUNK_MAX, state.chunkSize * 2);
+      state.bufferHigh = Math.min(BUFFER_HIGH_MAX, Math.floor(state.bufferHigh * 1.15));
+    }
+    state.bufferLow = Math.max(BUFFER_LOW_MIN, Math.floor(state.bufferHigh / 4));
+    dc.bufferedAmountLowThreshold = state.bufferLow;
   }
 
   async function hasStorageRoom(requiredBytes) {
@@ -98,8 +127,9 @@
     syncFileStatus(state, fs);
   }
 
-  async function awaitDrain(dc) {
-    while (dc.readyState === 'open' && dc.bufferedAmount > BUFFER_HIGH) {
+  async function awaitDrain(dc, state) {
+    const high = state && state.bufferHigh ? state.bufferHigh : BUFFER_HIGH;
+    while (dc.readyState === 'open' && dc.bufferedAmount > high) {
       await new Promise((r) => {
         const onLow = () => {
           dc.removeEventListener('bufferedamountlow', onLow);
@@ -144,7 +174,11 @@
   function syncFileStatus(state, fs) {
     if (!fs || !fs.entryId || !window.LTR.transferRegistry) return;
     window.LTR.transferRegistry.updateEntry(fs.entryId, {
-      status: fs.status, bytes: fs.bytes, error: fs.error, phase: fs.phase,
+      status: fs.status,
+      bytes: fs.bytes,
+      error: fs.error,
+      phase: fs.phase,
+      resumePct: fs.resumePct || 0,
     });
     if ((fs.status === 'sent' || fs.status === 'received')
         && state.peer) {
@@ -155,7 +189,10 @@
   }
 
   function wireSenderDc(dc, state) {
-    dc.bufferedAmountLowThreshold = BUFFER_LOW;
+    state.chunkSize = state.chunkSize || CHUNK_SIZE;
+    state.bufferHigh = state.bufferHigh || BUFFER_HIGH;
+    state.bufferLow = state.bufferLow || BUFFER_LOW;
+    dc.bufferedAmountLowThreshold = state.bufferLow;
     dc.onopen = () => {
       state.phase = 'sending';
       if (state.uiCard && ui()) ui().setCardPhase(state.uiCard, 'sending');
@@ -185,6 +222,10 @@
       if (msg.kind === 'ack' && typeof msg.bytes === 'number') {
         state.bytesAckedByReceiver = msg.bytes;
         state.lastAckAt = Date.now();
+        if (msg.fileId && typeof msg.fileBytes === 'number') {
+          const fs = state.fileStatuses.find((x) => x.fileId === msg.fileId);
+          if (fs) fs.bytesAcked = msg.fileBytes;
+        }
         if (ui()) ui().updateProgress(state);
       } else if (msg.kind === 'receiver-error') {
         const reason = msg.error || 'receiver-error';
@@ -228,7 +269,7 @@
 
   async function sendNextFile(state) {
     if (state.currentFileIdx >= state.files.length) {
-      await awaitDrain(state.dc);
+      await awaitDrain(state.dc, state);
       await safeSend(state, JSON.stringify({ kind: 'all-done' }), 'all-done');
       state.allFilesSent = true;
       const drainStart = Date.now();
@@ -251,7 +292,7 @@
     syncFileStatus(state, fs);
     setSessionUiState(state, 'Préparation…');
 
-    await awaitDrain(state.dc);
+    await awaitDrain(state.dc, state);
 
     if (state.currentFileIdx === 0) {
       state.sessionId = state.sessionId || makeSessionId();
@@ -276,7 +317,11 @@
       type: file.type || 'application/octet-stream',
       idx:  state.currentFileIdx,
       fileId: state.sessionId + ':' + state.currentFileIdx,
+      stableFileId: stableFileId(file),
+      lastModified: file.lastModified || 0,
     };
+    fs.fileId = meta.fileId;
+    fs.stableFileId = meta.stableFileId;
     if (!await safeSend(state, JSON.stringify(meta), 'file-meta')) {
       skipFailedFile(state, fs, 'meta');
       return;
@@ -297,10 +342,10 @@
       state.bytesAckedByReceiver = Math.max(
         state.bytesAckedByReceiver, state.bytesSent);
       fs.bytes = resumeOffset;
+      fs.resumePct = Math.floor((resumeOffset / Math.max(1, file.size)) * 100);
       fs.phase = 'resuming';
       syncFileStatus(state, fs);
-      setSessionUiState(state, 'Reprise à ' + Math.floor(
-        (resumeOffset / Math.max(1, file.size)) * 100) + ' %');
+      setSessionUiState(state, 'Reprise à ' + fs.resumePct + ' %');
     } else {
       updateFilePhase(state, fs, 'sending');
       setSessionUiState(state, 'Envoi…');
@@ -315,8 +360,9 @@
         if (done) break;
         let pos = 0;
         while (pos < value.byteLength) {
-          await awaitDrain(state.dc);
-          const end = Math.min(pos + CHUNK_SIZE, value.byteLength);
+          tuneFlow(state, state.dc);
+          await awaitDrain(state.dc, state);
+          const end = Math.min(pos + state.chunkSize, value.byteLength);
           const slice = new Uint8Array(value.buffer,
                                         value.byteOffset + pos,
                                         end - pos).slice();
@@ -328,6 +374,11 @@
           state.bytesSent += slice.byteLength;
           fileBytesSent += slice.byteLength;
           fs.bytes = fileBytesSent;
+          const now = Date.now();
+          if (!fs.lastRegistryAt || now - fs.lastRegistryAt > 500) {
+            fs.lastRegistryAt = now;
+            syncFileStatus(state, fs);
+          }
           pos = end;
           if (ui()) ui().updateProgress(state);
         }
@@ -341,7 +392,7 @@
 
     if (aborted) { skipFailedFile(state, fs, 'send'); return; }
 
-    await awaitDrain(state.dc);
+    await awaitDrain(state.dc, state);
     updateFilePhase(state, fs, 'finalizing');
     setSessionUiState(state, 'Finalisation…');
     if (!await safeSend(state, JSON.stringify({
@@ -374,7 +425,11 @@
         if (dc.readyState !== 'open') return;
         try {
           dc.send(JSON.stringify({
-            kind: 'ack', bytes: state.bytesReceived }));
+            kind: 'ack',
+            bytes: state.bytesReceived,
+            fileId: state.activeFile && state.activeFile.fileId,
+            fileBytes: state.activeFile && state.activeFile.received,
+          }));
         } catch {}
         // V1.6.5 — Sprint Stabilité (Wave 2 item E) : persiste l'état
         // de réception en cours dans IndexedDB pour qu'un reload onglet
@@ -398,9 +453,11 @@
       if (typeof data === 'string') {
         let msg;
         try { msg = JSON.parse(data); } catch { return; }
-        handleReceiverControl(msg, state).catch((e) =>
-          clientLog('error', '[p2p] handleReceiverControl: '
-                    + (e && e.message)));
+        state.controlQueue = (state.controlQueue || Promise.resolve())
+          .then(() => handleReceiverControl(msg, state))
+          .catch((e) =>
+            clientLog('error', '[p2p] handleReceiverControl: '
+                      + (e && e.message)));
       } else {
         // V1.6.3 — chunk binaire : sérialise via writeQueue pour ne
         // pas perdre l'ordre quand OPFS write est async.
@@ -480,7 +537,7 @@
       }
       const resume = await findResumeCandidate(state, msg);
       const cur = {
-        idx, fileId: msg.fileId,
+        idx, fileId: msg.fileId, stableFileId: msg.stableFileId || '',
         name: msg.name, size: msg.size, type: msg.type,
         received: resume ? resume.bytesWritten : 0,
         // OPFS-or-Blob — décidé selon capability et taille.
@@ -540,6 +597,9 @@
         idx, fileId: msg.fileId, name: msg.name, size: msg.size,
         status: 'sending', bytes: cur.received, error: null, entryId: null,
         phase: cur.received > 0 ? 'resuming' : 'writing',
+        resumePct: cur.received > 0
+          ? Math.floor((cur.received / Math.max(1, cur.size)) * 100)
+          : 0,
       };
       if (window.LTR.transferRegistry) {
         fs.entryId = window.LTR.transferRegistry.addEntry({
@@ -551,7 +611,9 @@
       }
       state.fileStatuses.push(fs);
       syncFileStatus(state, fs);
-      setSessionUiState(state, cur.received > 0 ? 'Reprise réception…' : 'Écriture disque…');
+      setSessionUiState(state, cur.received > 0
+        ? 'Reprise réception à ' + fs.resumePct + ' %'
+        : 'Écriture disque…');
       await sendFileReady(state, cur);
     } else if (msg.kind === 'file-end') {
       await finalizeReceivedFile(state, msg);
@@ -693,15 +755,23 @@
     } catch {
       return null;
     }
+    const now = Date.now();
+    for (const item of pending || []) {
+      const v = item.value;
+      if (!v || !v.lastAckAt || now - v.lastAckAt <= PENDING_TTL_MS) continue;
+      await removePendingPartial(v).catch(() => {});
+    }
+    const stableId = msg.stableFileId || '';
     const match = (pending || [])
       .map((item) => item.value)
       .filter((v) => {
         const meta = v && v.fileMeta;
         const peer = v && v.peer;
         return v && meta && peer
+          && (!v.lastAckAt || now - v.lastAckAt <= PENDING_TTL_MS)
           && peer.deviceId === state.peer.deviceId
-          && meta.name === msg.name
-          && meta.size === msg.size
+          && ((stableId && meta.stableFileId === stableId)
+              || (!stableId && meta.name === msg.name && meta.size === msg.size))
           && v.bytesWritten > 0
           && v.bytesWritten < msg.size;
       })
@@ -721,6 +791,19 @@
     }
   }
 
+  async function removePendingPartial(entry) {
+    if (!entry || !entry.opfsName) return;
+    if (OPFS_AVAILABLE) {
+      try {
+        const root = await navigator.storage.getDirectory();
+        await root.removeEntry(entry.opfsName);
+      } catch {}
+    }
+    if (window.LTR.idb) {
+      await window.LTR.idb.delete('ltr-p2p-pending', entry.opfsName);
+    }
+  }
+
   function humanReceiverError(error) {
     const map = {
       quota_insuffisant: 'Espace insuffisant',
@@ -733,6 +816,32 @@
       opfs_resume: 'Reprise navigateur indisponible',
     };
     return map[error] || 'Récepteur indisponible';
+  }
+
+  function cleanupError(label) {
+    const text = label || '';
+    if (text.includes('Wi-Fi') || text.includes('route')
+        || text.includes('réseau') || text.includes('Réseau')) {
+      return 'network_lost';
+    }
+    if (text.includes('Annulé')) return 'cancelled';
+    if (text.includes('fermée') || text.includes('muet')
+        || text.includes('Hors-ligne')) {
+      return 'peer_closed';
+    }
+    if (text.includes('DataChannel')) return 'network_lost';
+    return 'send';
+  }
+
+  function failOpenFileStatuses(state, label) {
+    if (!state || !state.fileStatuses) return;
+    const error = cleanupError(label);
+    for (const fs of state.fileStatuses) {
+      if (fs.status !== 'pending' && fs.status !== 'sending') continue;
+      fs.status = 'failed';
+      fs.error = error;
+      syncFileStatus(state, fs);
+    }
   }
 
   // V1.6.5 — Wave 2 item E : helpers de persistance du sidecar IndexedDB.
@@ -750,7 +859,12 @@
         emoji:       state.peer.emoji,
         platformLabel: state.peer.platformLabel,
       },
-      fileMeta: { name: cur.name, size: cur.size, type: cur.type },
+      fileMeta: {
+        name: cur.name,
+        size: cur.size,
+        type: cur.type,
+        stableFileId: cur.stableFileId || '',
+      },
       bytesWritten: cur.received,
       lastAckAt:    Date.now(),
       startedAt:    state.startedAt || Date.now(),
@@ -779,10 +893,13 @@
         if (bar) bar.remove();
       }, 3000);
     }
+    const isSuccess = label && label.startsWith('✓');
+    if (!isSuccess) failOpenFileStatuses(state, label);
     if (state.ttlTimer)        clearTimeout(state.ttlTimer);
     if (state.connectTimer)    clearTimeout(state.connectTimer);
     if (state.senderTtl)       clearTimeout(state.senderTtl);
     if (state.disconnectTimer) clearTimeout(state.disconnectTimer);
+    if (state.iceRestartTimer) clearTimeout(state.iceRestartTimer);
     if (state.noDataWatchdog)  clearTimeout(state.noDataWatchdog);
     if (state.ackTimer)        clearInterval(state.ackTimer);
     if (state.ackWatchdog)     clearInterval(state.ackWatchdog);
@@ -794,7 +911,6 @@
     // fichiers en cours sur cette session si on cleanup avec succès.
     // En cas d'échec (label ≠ ✓ Reçu), on les LAISSE pour permettre la
     // reprise au prochain boot d'onglet.
-    const isSuccess = label && label.startsWith('✓');
     if (isSuccess && state.role === 'receiver' && state.receivingFiles) {
       for (const cur of state.receivingFiles) {
         if (cur.opfsName) clearPendingSidecar(cur).catch(() => {});
@@ -820,7 +936,7 @@
     handleReceiverControl, finalizeReceivedFile,
     skipFailedFile, syncFileStatus,
     cleanup, cleanupAll,
-    CHUNK_SIZE, BUFFER_HIGH, BUFFER_LOW,
+    CHUNK_SIZE, CHUNK_MIN, CHUNK_MAX, BUFFER_HIGH, BUFFER_LOW,
     ACK_INTERVAL_MS, NO_ACK_TIMEOUT_MS,
     WATCHDOG_NO_DATA_MS, DRAIN_TIMEOUT_MS,
     hasStorageRoom,

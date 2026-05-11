@@ -75,6 +75,17 @@ struct WebOfferTimedOutEvent {
     std::string uploadId;
 };
 
+// V1.6.4 — Sprint Sécurité (Wave 2 TOFU TCP).
+// Émis par TransferClient quand l'empreinte reçue dans Accept ne matche
+// PAS celle stockée dans known_peers.json pour ce peerId. Non-bloquant :
+// le transfert continue, l'AppController positionne juste un flag de
+// warning sur le pair pour affichage inline (⚠ orange) côté UI.
+struct FingerprintChangedEvent {
+    std::string peerId;
+    std::string oldFingerprint;
+    std::string newFingerprint;
+};
+
 using Event = std::variant<
     PeerSeenEvent, PeerLostEvent,
     IncomingOfferEvent, OfferAnsweredEvent,
@@ -83,7 +94,8 @@ using Event = std::variant<
     LogEvent,
     WebUploadStartedEvent,
     WebIncomingOfferEvent,
-    WebOfferTimedOutEvent>;
+    WebOfferTimedOutEvent,
+    FingerprintChangedEvent>;
 
 // File d'événements thread-safe consommée par le thread UI à chaque frame.
 class EventBus {

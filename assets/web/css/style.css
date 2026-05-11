@@ -137,6 +137,197 @@ body.page-login {
   max-width: 260px;
   padding: 12px var(--sp-lg);
 }
+.btn-login:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* V1.6.5 — Sprint Stabilité (Wave 4 item L) : toast bloquant TOFU P2P */
+#p2p-tofu-host {
+  position: fixed;
+  top: var(--sp-lg);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  pointer-events: auto;
+  width: min(92vw, 460px);
+}
+.p2p-tofu-toast {
+  background: var(--warning);
+  color: white;
+  border-radius: var(--r-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  padding: var(--sp-md) var(--sp-lg);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-md);
+}
+.p2p-tofu-icon {
+  font-size: 28px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.p2p-tofu-body { flex: 1; }
+.p2p-tofu-title {
+  font-weight: 700;
+  font-size: var(--fs-body);
+  margin-bottom: var(--sp-xs);
+}
+.p2p-tofu-sub {
+  font-size: var(--fs-small);
+  opacity: 0.9;
+  margin-bottom: var(--sp-md);
+}
+.p2p-tofu-actions {
+  display: flex;
+  gap: var(--sp-sm);
+}
+.p2p-tofu-btn {
+  background: rgba(255, 255, 255, 0.18);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: var(--r-sm);
+  padding: 6px 14px;
+  font-size: var(--fs-small);
+  font-weight: 600;
+  cursor: pointer;
+}
+.p2p-tofu-btn:hover { background: rgba(255, 255, 255, 0.3); }
+.p2p-tofu-trust {
+  background: white;
+  color: var(--warning);
+  border-color: white;
+}
+.p2p-tofu-trust:hover { background: rgba(255, 255, 255, 0.9); }
+
+/* V1.6.5 — Sprint Stabilité (Wave 3) : checkboxes /login */
+.login-options {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-sm);
+  margin-top: var(--sp-md);
+  width: 100%;
+  max-width: 260px;
+}
+.login-opt {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  font-size: var(--fs-small);
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+.login-opt input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.opt-info {
+  color: var(--text-secondary);
+  cursor: help;
+  font-size: var(--fs-small);
+}
+
+/* V1.6.5 — Sprint Stabilité (Wave 2 item E) : transfert P2P interrompu */
+.p2p-entry-interrupted {
+  border-left: 3px solid var(--warning);
+}
+.p2p-resume-btn {
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: var(--r-sm);
+  padding: 4px 10px;
+  font-size: var(--fs-small);
+  font-weight: 600;
+  cursor: pointer;
+  margin-right: var(--sp-xs);
+}
+.p2p-resume-btn:hover { background: var(--accent-hover); }
+.p2p-discard-btn {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--separator);
+  border-radius: var(--r-sm);
+  padding: 4px 10px;
+  font-size: var(--fs-small);
+  cursor: pointer;
+}
+.p2p-discard-btn:hover {
+  background: var(--surface);
+  color: var(--error);
+  border-color: var(--error);
+}
+
+/* V1.6.5 — Sprint Stabilité (Wave 1, item C) : bouton "Reprendre" upload */
+.btn-resume-upload {
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: var(--r-sm);
+  padding: 4px 10px;
+  font-size: var(--fs-small);
+  font-weight: 600;
+  cursor: pointer;
+  margin-left: var(--sp-xs);
+}
+.btn-resume-upload:hover { background: var(--accent-hover); }
+
+/* V1.6.4 — Sprint Sécurité : bandeau de vérification cert HTTPS */
+.cert-banner {
+  width: 100%;
+  background: #FFFBEB;             /* warning très clair */
+  border: 1px solid var(--warning);
+  border-radius: var(--r-md);
+  padding: var(--sp-md) var(--sp-lg);
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-sm);
+}
+.cert-banner-title {
+  margin: 0;
+  font-weight: 700;
+  color: #92400E;
+  font-size: var(--fs-body);
+}
+.cert-banner-sub {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--fs-small);
+}
+.cert-fingerprint {
+  margin: 0;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--separator);
+  border-radius: var(--r-sm);
+  padding: var(--sp-sm);
+  word-break: break-all;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+.cert-trust-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  font-size: var(--fs-small);
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+.cert-trust-row input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
 
 /* ============================================================
    PAGE / (principale)
@@ -180,9 +371,35 @@ body.page-main {
   text-overflow: ellipsis;
   max-width: 50%;
 }
+.session-pill {
+  padding: 4px var(--sp-md);
+  background: var(--surface);
+  color: var(--text-secondary);
+  border: 1px solid var(--separator);
+  font-size: var(--fs-small);
+  font-weight: 700;
+  border-radius: var(--r-pill);
+  white-space: nowrap;
+}
+.session-pill[data-state="ok"] {
+  background: var(--accent-light);
+  color: var(--accent);
+  border-color: transparent;
+}
+.session-pill[data-state="warn"] {
+  background: #FFFBEB;
+  color: #92400E;
+  border-color: var(--warning);
+}
+.session-pill[data-state="error"] {
+  background: #FEE2E2;
+  color: var(--error);
+  border-color: var(--error);
+}
 
-/* Bouton logout : icône seule sur mobile, icône + texte sur desktop */
-.logout-btn {
+/* Actions header : icône seule sur mobile, icône + texte sur desktop */
+.logout-btn,
+.header-action-btn {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-sm);
@@ -197,12 +414,23 @@ body.page-main {
   font-size: var(--fs-body);
   font-weight: 600;
 }
-.logout-btn:hover { background: var(--sidebar); }
-.logout-icon { font-size: 18px; line-height: 1; }
+.logout-btn:hover,
+.header-action-btn:hover { background: var(--sidebar); }
+.logout-icon,
+.header-action-icon { font-size: 18px; line-height: 1; }
+.header-action-icon {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+.forget-btn { color: var(--text-secondary); }
 @media (max-width: 479px) {
-  .logout-label { display: none; }
-  .logout-btn { padding: 8px; }
-  .host-pill { display: none; }
+  .logout-label,
+  .header-action-label { display: none; }
+  .logout-btn,
+  .header-action-btn { padding: 8px; }
+  .host-pill,
+  .session-pill { display: none; }
 }
 
 .app-main {
@@ -260,6 +488,114 @@ body.page-main {
 }
 .btn-ghost:hover { background: var(--sidebar); }
 
+/* ============================================================
+   SHARE ACCESS MODAL
+   ============================================================ */
+.modal-open { overflow: hidden; }
+.share-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.share-modal[hidden] { display: none; }
+.share-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(15, 23, 42, 0.38);
+  cursor: pointer;
+}
+.share-sheet {
+  position: relative;
+  width: 100%;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  background: var(--surface);
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+  padding: var(--sp-xl);
+  box-shadow: 0 -12px 32px rgba(15, 23, 42, 0.18);
+}
+.share-sheet-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-lg);
+  margin-bottom: var(--sp-lg);
+}
+.share-sheet h2 {
+  margin: 0;
+  font-size: var(--fs-h1);
+  line-height: 1.15;
+}
+.share-sheet p {
+  margin: var(--sp-xs) 0 0;
+  color: var(--text-secondary);
+}
+.share-close { flex-shrink: 0; }
+.share-qr-wrap {
+  display: flex;
+  justify-content: center;
+  padding: var(--sp-md);
+  margin-bottom: var(--sp-lg);
+  background: white;
+  border: 1px solid var(--separator);
+  border-radius: var(--r-md);
+}
+.share-qr-wrap img {
+  width: min(260px, 72vw);
+  height: auto;
+  image-rendering: pixelated;
+}
+.share-fields {
+  margin: 0;
+  display: grid;
+  gap: var(--sp-sm);
+}
+.share-fields div {
+  min-width: 0;
+  padding: var(--sp-md);
+  background: var(--sidebar);
+  border-radius: var(--r-md);
+}
+.share-fields dt {
+  color: var(--text-secondary);
+  font-size: var(--fs-overline);
+  font-weight: 800;
+  text-transform: uppercase;
+  margin-bottom: var(--sp-xs);
+}
+.share-fields dd {
+  margin: 0;
+  color: var(--text);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.share-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--sp-sm);
+  margin-top: var(--sp-lg);
+}
+.share-status {
+  min-height: 1.4em;
+  text-align: center;
+  font-size: var(--fs-small);
+  font-weight: 700;
+  color: var(--success);
+}
+@media (min-width: 720px) {
+  .share-modal { align-items: center; }
+  .share-sheet {
+    width: min(440px, calc(100vw - 48px));
+    border-radius: var(--r-lg);
+    box-shadow: 0 16px 40px rgba(15, 23, 42, 0.22);
+  }
+  .share-actions { grid-template-columns: 1fr 1fr; }
+}
+
 /* V1.1.7 : 2 boutons côte à côte (fichiers + dossier) */
 .pick-buttons {
   display: flex;
@@ -312,6 +648,10 @@ body.page-main {
 /* ============================================================
    INSTALL BANNER
    ============================================================ */
+/* V1.6.5+ : sans cette règle, l'attribut HTML `hidden` est ignoré
+   parce que `.install-banner { display: flex }` ci-dessous l'override.
+   Conséquence visible mobile : bandeau s'affichait malgré le skip JS. */
+.install-banner[hidden] { display: none !important; }
 .install-banner {
   background: var(--surface);
   margin: var(--sp-lg) var(--sp-xl) 0;
@@ -722,21 +1062,32 @@ body.page-main {
 /* Sticky bar bas pendant un transfert P2P actif. */
 .p2p-sticky-bar {
   position: fixed;
-  left: 0; right: 0; bottom: 0;
+  left: 50%;
+  top: calc(env(safe-area-inset-top) + 12px);
+  transform: translateX(-50%);
   z-index: 50;
   display: flex;
   align-items: center;
   gap: var(--sp-sm);
-  padding: var(--sp-md) var(--sp-lg);
+  width: min(420px, calc(100vw - 32px));
+  min-height: 38px;
+  padding: 8px 14px;
   background: var(--accent);
   color: #fff;
   font-size: var(--fs-small);
   font-weight: 600;
-  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.12);
+  border-radius: 999px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
 }
 .p2p-sticky-bar[hidden] { display: none; }
 .p2p-sticky-icon { font-size: 16px; }
-.p2p-sticky-text { flex: 1; }
+.p2p-sticky-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* Toast non bloquant. */
 .p2p-toast {
@@ -769,6 +1120,10 @@ body.page-main {
   border: 1px solid var(--separator);
   border-radius: var(--r-md);
   margin-bottom: var(--sp-xs);
+}
+.upload-row-draft {
+  opacity: 0.78;
+  border-style: dashed;
 }
 .staging-row .staging-thumb {
   width: 40px; height: 40px;

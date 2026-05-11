@@ -21,6 +21,10 @@
 #include "ltr/web/assets/p2p_session_js.hpp"    // V1.6.1 — split refactor
 #include "ltr/web/assets/p2p_ui_js.hpp"         // V1.6.1 — split refactor
 #include "ltr/web/assets/transfer_registry_js.hpp"  // V1.3 — Sprint Web P2P V1.3
+#include "ltr/web/assets/share_js.hpp"
+#include "ltr/web/assets/idb_js.hpp"                // V1.6.5 — Wave 2 item E
+#include "ltr/web/assets/web_profile_js.hpp"
+#include "ltr/web/assets/pin_storage_js.hpp"        // V1.6.5 — Wave 3 item I
 #include "ltr/web/assets/login_js.hpp"
 #include "ltr/web/assets/style_css.hpp"
 #include "ltr/web/assets/icon_upload.hpp"
@@ -134,6 +138,20 @@ void registerStatic(WebService& svc) {
     // V1.3 — Sprint Web P2P V1.3 : registry / liste persistante.
     server.Get("/transfer_registry.js", [](const httplib::Request&, httplib::Response& res) {
         serveStatic(res, TransferRegistryJs, TransferRegistryJsMime);
+    });
+    server.Get("/share.js", [](const httplib::Request&, httplib::Response& res) {
+        serveStatic(res, ShareJs, ShareJsMime);
+    });
+    // V1.6.5 — Wave 2 item E : wrapper IndexedDB pour sidecar P2P pending.
+    server.Get("/idb.js", [](const httplib::Request&, httplib::Response& res) {
+        serveStatic(res, IdbJs, IdbJsMime);
+    });
+    server.Get("/web_profile.js", [](const httplib::Request&, httplib::Response& res) {
+        serveStatic(res, WebProfileJs, WebProfileJsMime);
+    });
+    // V1.6.5 — Wave 3 item I : stockage chiffré du PIN (WebCrypto AES-GCM).
+    server.Get("/pin_storage.js", [](const httplib::Request&, httplib::Response& res) {
+        serveStatic(res, PinStorageJs, PinStorageJsMime);
     });
     server.Get("/style.css", [](const httplib::Request&, httplib::Response& res) {
         serveStatic(res, StyleCss, StyleCssMime);

@@ -1,13 +1,15 @@
 // ============================================================
 // LocalTransfer — page /login
 // Gère la saisie du PIN 6 chiffres.
-// PAS d'auto-submit : soumission uniquement sur clic ou Entrée.
+// Auto-submit uniquement pour les QR signés par l'URL autologin=1.
 // ============================================================
 (function () {
   'use strict';
 
   const $  = (s) => document.querySelector(s);
   const $$ = (s) => Array.from(document.querySelectorAll(s));
+  const params = new URLSearchParams(window.location.search);
+  const signedOut = params.get('signed_out') === '1';
 
   // ---------- device_id stable (localStorage) ----------
   function uuidv4() {
@@ -44,6 +46,71 @@
     .then((r) => r.json())
     .then((info) => { $('#host-name').textContent = info.name || 'cet appareil'; })
     .catch(() => { /* ignore */ });
+
+  if (!signedOut && window.LTR.tryRefreshSession) {
+    window.LTR.tryRefreshSession().then((ok) => {
+      if (ok) window.location.href = '/';
+    }).catch(() => {});
+  }
+
+  // ---------- V1.6.4 — bandeau certificat HTTPS ----------
+  // Désactive le bouton « Se connecter » tant que l'empreinte n'a pas été
+  // confirmée par l'utilisateur (checkbox cochée). Si la même empreinte
+  // a déjà été acceptée sur ce host, on auto-coche pour éviter le frottement
+  // au retour de l'utilisateur.
+  const submitBtn = $('.btn-login');
+  const TRUST_KEY = 'ltr-cert-trusted-fingerprint';
+  let certVerified = true;     // par défaut OK (HTTP plain ou empreinte mémorisée)
+  let certCheckDone = window.location.protocol !== 'https:';
+  let urlPrefilledPin = false;
+  let qrAutoLogin = false;
+  let autoLoginAttempted = false;
+
+  function updateSubmitState() {
+    if (submitBtn) submitBtn.disabled = !certVerified;
+  }
+
+  function maybeAutoSubmitFromQr() {
+    if (!qrAutoLogin || !urlPrefilledPin || autoLoginAttempted) return;
+    if (!certCheckDone || !certVerified) return;
+    autoLoginAttempted = true;
+    setTimeout(() => { submit(); }, 0);
+  }
+
+  if (window.location.protocol === 'https:') {
+    fetch('/api/cert-info', { credentials: 'same-origin' })
+      .then((r) => r.json())
+      .then((info) => {
+        const fp = (info && info.fingerprint) || '';
+        if (!fp) return;
+        let trustedFp = null;
+        try { trustedFp = localStorage.getItem(TRUST_KEY); } catch (e) {}
+        if (trustedFp === fp) {
+          // Déjà accepté pour ce cert : pas de bandeau.
+          return;
+        }
+        // Sinon : afficher le bandeau, désactiver le submit jusqu'à coche.
+        certVerified = false;
+        updateSubmitState();
+        const banner = $('#cert-banner');
+        $('#cert-fingerprint').textContent = fp;
+        banner.hidden = false;
+        $('#cert-trusted').addEventListener('change', (e) => {
+          certVerified = !!e.target.checked;
+          updateSubmitState();
+          if (certVerified) {
+            try { localStorage.setItem(TRUST_KEY, fp); } catch (e) {}
+            maybeAutoSubmitFromQr();
+          }
+        });
+      })
+      .catch(() => { /* HTTP fallback ou cert-info indisponible : on laisse passer */ })
+      .finally(() => {
+        certCheckDone = true;
+        maybeAutoSubmitFromQr();
+      });
+  }
+  updateSubmitState();
 
   // ---------- saisie PIN ----------
   const inputs = $$('.pin-input');
@@ -90,17 +157,54 @@
 
   // V1.5 — Sprint Hardening : si l'URL contient ?pin=XXXXXX (QR avec
   // PIN scanné depuis la SharePanel desktop), pré-remplir les 6 cases.
-  // PAS d'auto-submit — l'utilisateur clique « Se connecter » pour
-  // garder le contrôle.
+  // Avec &autologin=1 (QR host), on soumet automatiquement après validation
+  // du garde-fou certificat HTTPS.
   try {
-    const params = new URLSearchParams(window.location.search);
     const prefilled = (params.get('pin') || '').replace(/\D/g, '');
+    qrAutoLogin = params.get('autologin') === '1';
     if (prefilled.length === 6) {
       [...prefilled].forEach((c, i) => { if (inputs[i]) inputs[i].value = c; });
       inputs[5].focus();
+      urlPrefilledPin = true;
       clientLog('info', 'pin pré-rempli depuis URL');
+      maybeAutoSubmitFromQr();
     }
   } catch (e) { /* ignore */ }
+
+  // V1.6.5 — Sprint Stabilité (Wave 3 item I).
+  // « Mémoriser le PIN » : disabled si pas en HTTPS (WebCrypto requiert
+  // un secure context). Pré-coche depuis localStorage si le PIN a déjà
+  // été stocké pour ce cert et qu'on l'a chargé pour pré-remplir.
+  let cachedCertFingerprint = '';
+  const optPin = $('#opt-remember-pin');
+  if (optPin) {
+    if (window.LTR.pinStorage && !window.LTR.pinStorage.isAvailable()) {
+      optPin.disabled = true;
+      const row = $('#opt-pin-row');
+      if (row) row.title = 'Disponible uniquement en HTTPS';
+      const span = row ? row.querySelector('span') : null;
+      if (span) span.textContent = 'Mémoriser le PIN (HTTPS uniquement)';
+    }
+  }
+
+  // Si fingerprint cert dispo + PIN sauvegardé → pré-remplit silencieusement.
+  if (window.location.protocol === 'https:'
+      && window.LTR.pinStorage && window.LTR.pinStorage.isAvailable()) {
+    fetch('/api/cert-info', { credentials: 'same-origin' })
+      .then((r) => r.json())
+      .then(async (info) => {
+        const fp = (info && info.fingerprint) || '';
+        if (!fp) return;
+        cachedCertFingerprint = fp;
+        const stored = await window.LTR.pinStorage.loadPin(fp);
+        if (stored && stored.length === 6) {
+          [...stored].forEach((c, i) => { if (inputs[i]) inputs[i].value = c; });
+          if (optPin) optPin.checked = true;
+          clientLog('info', 'PIN restauré depuis localStorage chiffré');
+        }
+      })
+      .catch(() => { /* ignore */ });
+  }
 
   // ---------- soumission ----------
   async function submit() {
@@ -110,15 +214,18 @@
       return;
     }
     const device_id = getDeviceId();
-    clientLog('info', 'submit POST /api/auth device_id=' +
-                device_id.substring(0, 8));
+    const remember = !!($('#opt-remember') && $('#opt-remember').checked);
+    const rememberPin = !!(optPin && optPin.checked && !optPin.disabled);
+    clientLog('info', 'submit POST /api/auth device_id='
+                + device_id.substring(0, 8)
+                + ' remember=' + remember + ' rememberPin=' + rememberPin);
 
     let resp;
     try {
       resp = await fetch('/api/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin, device_id }),
+        body: JSON.stringify({ pin, device_id, remember }),
         credentials: 'same-origin',
       });
     } catch (e) {
@@ -144,6 +251,22 @@
       // top-level explicite — plus fiable sur iOS Safari que fetch redirect.
       let body = null;
       try { body = await resp.json(); } catch (e) {}
+
+      // V1.6.5 — Wave 3 item I : sauvegarde le PIN chiffré si demandé,
+      // ou efface si l'utilisateur a explicitement décoché.
+      if (window.LTR.pinStorage) {
+        if (rememberPin && cachedCertFingerprint) {
+          try {
+            await window.LTR.pinStorage.savePin(pin, cachedCertFingerprint);
+            clientLog('info', 'PIN chiffré sauvegardé');
+          } catch (e) {
+            clientLog('warn', 'savePin failed: ' + (e && e.message));
+          }
+        } else if (!rememberPin) {
+          window.LTR.pinStorage.clearPin();
+        }
+      }
+
       const next = (body && body.next) || '/';
       clientLog('info', 'auth ok → navigation vers ' + next);
       window.location.href = next;

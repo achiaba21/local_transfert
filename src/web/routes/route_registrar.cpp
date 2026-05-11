@@ -6,6 +6,7 @@
 #include "ltr/web/routes/logout_routes.hpp"
 #include "ltr/web/routes/p2p_routes.hpp"
 #include "ltr/web/routes/self_routes.hpp"
+#include "ltr/web/routes/share_routes.hpp"
 #include "ltr/web/routes/static_routes.hpp"
 #include "ltr/web/routes/upload_routes.hpp"
 
@@ -20,6 +21,7 @@ void registerAll(WebService& svc) {
     registerDownload(svc);
     registerP2P(svc);   // V1.2 — Sprint Web P2P
     registerSelf(svc);
+    registerShare(svc);
     registerStatic(svc);
 }
 

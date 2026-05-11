@@ -28,6 +28,13 @@ struct Device {
     // Renseigné uniquement si kind == Web. Token d'authentification
     // serveur pour router les pushs via WebService::pushFiles.
     std::string sessionToken;
+
+    // V1.6.4 — Sprint Sécurité (Wave 2 TOFU TCP).
+    // Positionné à true quand l'empreinte reçue côté Accept TCP ne
+    // matche pas celle stockée dans known_peers.json pour ce peerId.
+    // Affichage UI : icône ⚠ orange à droite du nom dans la sidebar,
+    // tooltip « L'empreinte du pair a changé ».
+    bool fingerprintWarning{false};
 };
 
 } // namespace ltr::domain

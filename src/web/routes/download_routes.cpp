@@ -11,6 +11,7 @@
 #include "ltr/core/event_bus.hpp"
 #include "ltr/core/logger.hpp"
 #include "ltr/core/types.hpp"
+#include "ltr/web/range_parser.hpp"
 #include "ltr/web/streaming_zip_source.hpp"
 #include "ltr/web/web_service.hpp"
 #include "ltr/web/routes/multi_server.hpp"
@@ -48,6 +49,7 @@ constexpr std::uint64_t kProgressByteStep = 1 * 1024 * 1024;
 
 // Dispatch : kind=File → stream disque classique.
 void streamFile(const DownloadTicket& tkt, WebService& svc,
+                const httplib::Request& req,
                 httplib::Response& res) {
     std::error_code ec;
     const auto sz = std::filesystem::file_size(tkt.path, ec);
@@ -58,11 +60,35 @@ void streamFile(const DownloadTicket& tkt, WebService& svc,
         return;
     }
 
+    // V1.6.5 — Sprint Stabilité (Wave 1, item D) : Range Requests RFC 7233.
+    // Si un browser fait un retry après coupure, il enverra "Range: bytes=N-"
+    // pour reprendre où il s'est arrêté. Sans ça, il reprend du début.
+    // Toujours annoncer Accept-Ranges pour que le browser sache qu'on supporte.
+    res.set_header("Accept-Ranges", "bytes");
+
+    RangeInfo range = parseRangeHeader(
+        req.get_header_value("Range"), sz);
+
+    const std::uint64_t streamStart = range.valid ? range.start : 0;
+    const std::uint64_t streamLen   = range.valid
+        ? (range.end - range.start + 1) : sz;
+
     const auto filename = rfc5987Encode(tkt.displayName);
     res.set_header("Content-Disposition",
         "attachment; filename*=UTF-8''" + filename);
-    res.set_header("Content-Length", std::to_string(sz));
+    res.set_header("Content-Length", std::to_string(streamLen));
     res.set_header("Cache-Control", "no-store");
+
+    if (range.valid) {
+        res.status = 206;
+        res.set_header("Content-Range",
+            "bytes " + std::to_string(range.start) + "-"
+            + std::to_string(range.end) + "/" + std::to_string(sz));
+        core::log_info("[range] sid=" + tkt.sessionId.substr(0, 8)
+                       + "... " + std::to_string(range.start) + "-"
+                       + std::to_string(range.end) + "/"
+                       + std::to_string(sz));
+    }
 
     auto fileStream = std::make_shared<std::ifstream>(
         tkt.path, std::ios::binary);
@@ -72,23 +98,36 @@ void streamFile(const DownloadTicket& tkt, WebService& svc,
         res.status = 500;
         return;
     }
+    if (streamStart > 0) {
+        fileStream->seekg(static_cast<std::streamoff>(streamStart),
+                          std::ios::beg);
+    }
 
     auto sessionId = tkt.sessionId;
     auto& bus = svc.bus();
-    auto sentTotal = std::make_shared<std::uint64_t>(0);
+    auto sentTotal = std::make_shared<std::uint64_t>(streamStart);
     auto doneEmitted = std::make_shared<bool>(false);
-    auto progressStarted = std::make_shared<bool>(false);
     auto lastProgressTime = std::make_shared<std::chrono::steady_clock::time_point>(
         std::chrono::steady_clock::now());
     auto lastProgressBytes = std::make_shared<std::uint64_t>(0);
     auto cancelFlag = svc.acquireCancelFlag(sessionId);
     const auto startTime = std::chrono::steady_clock::now();
 
+    // V1.6.5 — Sprint Stabilité (Wave 1, item A) : émet un TransferProgressEvent
+    // immédiat dès le GET reçu pour que l'UI passe de Proposed à InProgress et
+    // affiche la barre de progression. Avant ce fix, l'event n'était posté
+    // qu'au 1er chunk lu — si la connexion mourait avant le 1er byte (SSL
+    // handshake timeout, browser bloqué sur warning cert), la barre restait
+    // figée à 0%. Pour un Range request (retry), on émet déjà la position de
+    // reprise — l'UI ne « recule » pas à 0%.
+    bus.post(core::TransferProgressEvent{
+        sessionId, streamStart, 0.0, std::chrono::seconds(0)});
+
     res.set_content_provider(
         sz, "application/octet-stream",
-        [fileStream, sentTotal, doneEmitted, progressStarted,
+        [fileStream, sentTotal, doneEmitted,
          lastProgressTime, lastProgressBytes, cancelFlag,
-         sessionId, sz, startTime, &bus](
+         sessionId, sz, startTime, &bus, &svc](
             std::size_t /*offset*/, std::size_t length,
             httplib::DataSink& sink) {
             // V1.1.8-UX2 : vérif cancel avant chaque chunk.
@@ -97,6 +136,7 @@ void streamFile(const DownloadTicket& tkt, WebService& svc,
                     bus.post(core::TransferFailedEvent{sessionId, "cancelled"});
                     *doneEmitted = true;
                 }
+                svc.releaseCancelFlag(sessionId);  // V1.6.5 item B
                 return false;
             }
 
@@ -111,21 +151,19 @@ void streamFile(const DownloadTicket& tkt, WebService& svc,
                     bus.post(core::TransferDoneEvent{sessionId});
                     *doneEmitted = true;
                 }
+                svc.releaseCancelFlag(sessionId);  // V1.6.5 item B
                 sink.done();
                 return false;
             }
 
-            if (!*progressStarted) {
-                bus.post(core::TransferProgressEvent{
-                    sessionId, 0, 0.0, std::chrono::seconds(0)});
-                *progressStarted = true;
-            }
+            // V1.6.5 item A : progress 0% déjà émis avant set_content_provider.
 
             if (!sink.write(buf.data(), got)) {
                 if (!*doneEmitted) {
                     bus.post(core::TransferFailedEvent{sessionId, "cancelled"});
                     *doneEmitted = true;
                 }
+                svc.releaseCancelFlag(sessionId);  // V1.6.5 item B
                 return false;
             }
             *sentTotal += got;
@@ -170,7 +208,6 @@ void streamZip(const DownloadTicket& tkt, WebService& svc,
     auto sessionId = tkt.sessionId;
     auto& bus = svc.bus();
     auto doneEmitted = std::make_shared<bool>(false);
-    auto progressStarted = std::make_shared<bool>(false);
     auto lastProgressTime = std::make_shared<std::chrono::steady_clock::time_point>(
         std::chrono::steady_clock::now());
     auto lastProgressBytes = std::make_shared<std::uint64_t>(0);
@@ -178,11 +215,15 @@ void streamZip(const DownloadTicket& tkt, WebService& svc,
     const auto totalSize = tkt.size;
     const auto startTime = std::chrono::steady_clock::now();
 
+    // V1.6.5 item A : émet 0% AVANT le content_provider (cf. streamFile).
+    bus.post(core::TransferProgressEvent{
+        sessionId, 0, 0.0, std::chrono::seconds(0)});
+
     res.set_content_provider(
         tkt.size, "application/zip",
-        [source, sessionId, doneEmitted, progressStarted,
+        [source, sessionId, doneEmitted,
          lastProgressTime, lastProgressBytes, cancelFlag,
-         totalSize, startTime, &bus](
+         totalSize, startTime, &bus, &svc](
             std::size_t /*offset*/, std::size_t length,
             httplib::DataSink& sink) {
             // V1.1.8-UX2 : vérif cancel avant le provide.
@@ -191,13 +232,8 @@ void streamZip(const DownloadTicket& tkt, WebService& svc,
                     bus.post(core::TransferFailedEvent{sessionId, "cancelled"});
                     *doneEmitted = true;
                 }
+                svc.releaseCancelFlag(sessionId);  // V1.6.5 item B
                 return false;
-            }
-
-            if (!*progressStarted) {
-                bus.post(core::TransferProgressEvent{
-                    sessionId, 0, 0.0, std::chrono::seconds(0)});
-                *progressStarted = true;
             }
 
             const auto more = source->provide(sink, length);
@@ -212,12 +248,14 @@ void streamZip(const DownloadTicket& tkt, WebService& svc,
                         bus.post(core::TransferFailedEvent{sessionId, reason});
                         *doneEmitted = true;
                     }
+                    svc.releaseCancelFlag(sessionId);  // V1.6.5 item B
                     return false;
                 }
                 if (!*doneEmitted) {
                     bus.post(core::TransferDoneEvent{sessionId});
                     *doneEmitted = true;
                 }
+                svc.releaseCancelFlag(sessionId);  // V1.6.5 item B
                 sink.done();
                 return false;
             }
@@ -282,7 +320,7 @@ void registerDownload(WebService& svc) {
         if (tkt->kind == TicketKind::StreamingZip) {
             streamZip(*tkt, svc, res);
         } else {
-            streamFile(*tkt, svc, res);
+            streamFile(*tkt, svc, req, res);
         }
     });
 

@@ -6,6 +6,8 @@
 
 #include <SFML/Graphics/Text.hpp>
 
+#include <cmath>
+
 namespace ltr::ui {
 
 Button::Button() = default;
@@ -86,15 +88,15 @@ void Button::draw(sf::RenderTarget& target) const {
     rr.draw(target);
 
     sf::Text t;
-    t.setFont(theme_font());
+    // V1.6.5+ : Inter Bold dédié pour les boutons (vraie graisse).
+    t.setFont(theme_font_bold());
     t.setString(utf8(label_));
     t.setCharacterSize(FontSize::button);
-    t.setStyle(sf::Text::Bold);
     t.setFillColor(text);
     const auto b = t.getLocalBounds();
-    t.setPosition(
-        bounds_.left + (bounds_.width  - b.width)  / 2.f - b.left,
-        bounds_.top  + (bounds_.height - b.height) / 2.f - b.top);
+    const float x = bounds_.left + (bounds_.width  - b.width)  / 2.f - b.left;
+    const float y = bounds_.top  + (bounds_.height - b.height) / 2.f - b.top;
+    t.setPosition(std::round(x), std::round(y));
     target.draw(t);
 }
 

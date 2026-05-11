@@ -16,7 +16,16 @@ constexpr std::uint16_t kWebPort       = 45456;
 constexpr std::uint16_t kWebPortFallbackRange = 10;
 
 // Durée d'inactivité avant expiration d'une session web.
-constexpr auto kWebSessionTtl = std::chrono::seconds(30);
+// V1.6.5 — Wave 3 : 30s → 300s (5 min). Le heartbeat /api/ping toutes
+// les 10s suffit largement à maintenir vivante toute session active ;
+// 5 min couvre une perte Wi-Fi temporaire (avant expiration serveur).
+constexpr auto kWebSessionTtl = std::chrono::seconds(300);
+
+// V1.6.5 — Wave 3 (item H) : durée de vie du cookie persistent
+// `ltr_remember` qui autorise une recréation de session sans re-PIN.
+// Validité 30 jours. Invalidé automatiquement si le PIN du host change
+// (HMAC dépend du pinHash actuel).
+constexpr auto kWebSessionRememberTtl = std::chrono::hours(24 * 30);
 
 // Intervalle de ré-émission du PeerSeenEvent pour les sessions web
 // (keepalive pour que la session reste dans la liste desktop).

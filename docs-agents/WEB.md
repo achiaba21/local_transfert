@@ -688,3 +688,154 @@ events, progression) est strictement identique entre natif et web.
 - Pas de rate-limit sur le PIN (à noter pour V2)
 - Pas de signature des binaires servis (hors scope code — Apple Developer
   ID et Windows Authenticode à faire avant release publique)
+
+
+---
+
+## V1.6.5 — Sprint Stabilité, Sessions résilientes, Historique (2026-05)
+
+Suite à l'audit utilisateur post-V1.6.4, 5 zones d'instabilité ont été
+adressées via 4 vagues couvrant HTTP + P2P.
+
+### Wave 1 — Stabilité HTTP
+
+- **Bug "bloqué à 0%"** : `TransferProgressEvent{streamStart}` est désormais
+  émis dès l'entrée du handler `streamFile`/`streamZip`, **avant** le
+  `set_content_provider`. Avant le fix, l'event n'arrivait qu'au 1er chunk
+  lu — une coupure SSL handshake / cert warning bloqué côté browser laissait
+  l'UI desktop figée.
+- **Cancel flag leak** : `WebService::releaseCancelFlag(sid)` appelé sur
+  toutes les terminaisons du content_provider (cancel, EOF, write fail).
+  Plus de fuite de `cancelFlags_[sid]` accumulés.
+- **Resume upload (minimal)** : `upload.js` retry 3× backoff exp 1s/2s/4s.
+  Si après 3 retries l'upload échoue, bouton « ↻ Reprendre » manuel dans
+  l'UI. **Le serveur ne supporte pas encore le vrai resume avec offset**
+  (chunked HTTP avec Content-Range) — reporté à V1.6.6.
+- **Range Requests RFC 7233** : `download_routes.cpp` parse `Range: bytes=N-`,
+  retourne 206 Partial Content + `Content-Range`. Le browser fait
+  automatiquement le retry avec range en cas de coupure réseau pendant
+  un download `<a href download>`. Module `range_parser.{hpp,cpp}` testé
+  unitairement (11 cas).
+
+### Wave 2 — Resume P2P
+
+- **iceRestart automatique** : `p2p_transport.js` monitore
+  `pc.connectionState`. Si `disconnected > 5s`, le sender appelle
+  `pc.createOffer({iceRestart:true})` + signal `ice-restart` au pair.
+  Le receiver applique `setRemoteDescription` + `createAnswer` + signal
+  `ice-restart-answer`. Symétrie complète. Si reconnexion < 15s, le
+  DataChannel reprend ; sinon cleanup normal `'✗ Wi-Fi perdu'`.
+- **Sidecar IndexedDB receveur** : `idb.js` (NEW, ~80 lignes natif sans
+  dépendance) expose `window.LTR.idb`. À chaque ack reçu (toutes les 500ms),
+  `p2p_session.js` persiste `{opfsName, peer, fileMeta, bytesWritten,
+  lastAckAt, startedAt}` dans le store `'ltr-p2p-pending'`. Au boot d'un
+  nouvel onglet, `transfer_registry.js` scan le store : pour chaque entry
+  > 30s ancienne, affiche une card « Interrompu (X/Y MB) » avec deux
+  boutons : « ▶ Reprendre » (récupère le partial OPFS via
+  `getFileHandle.getFile()` + download Blob) et « ✕ Annuler » (purge
+  OPFS + sidecar). **Le vrai resume du DataChannel** (renégocier session
+  avec sender) demande coopération du peer original — reporté à V1.6.7.
+- **Item F (sidecar émetteur)** abandonné par décision BA : le sandbox
+  browser empêche persister le `File` brut, le re-pick manuel introduit
+  trop de friction.
+
+### Wave 3 — Sessions résilientes
+
+- **TTL session** : `kWebSessionTtl` 30s → **300s** (5 min). Le heartbeat
+  `/api/ping` 10s suffit largement à maintenir vivante toute session active.
+- **Cookie persistent `ltr_remember`** (HMAC SHA-256 RFC 2104) : signé avec
+  un secret = fingerprint cert HTTPS V1.6.4 (stable, et déjà persisté
+  dans `cfgDir/cert.pem`). Format
+  `{deviceId}.{exp}.{pinHash8}.{HMAC_HEX}`. Validité 30 jours.
+  Invalidé automatiquement si le PIN host change (pinHash8 ne match plus)
+  ou si le cert est régénéré (secret HMAC change).
+  Émis par `POST /api/auth` quand body contient `remember:true` (checkbox
+  cochée par défaut, décision BA Q3). Endpoint
+  **`POST /api/auth/refresh`** vérifie le cookie + recrée la session sans
+  re-PIN. Test unit `test_persistent_token` (9 cas : roundtrip, PIN
+  différent, secret différent, expiré, tampered, format).
+- **Compare HMAC constant-time** dans `verifyPersistentToken` pour éviter
+  une timing-attack théorique sur le cookie 30j.
+- **PIN remember côté browser** : checkbox visible (décision BA Q4.a),
+  décochée par défaut. Module `pin_storage.js` (NEW) chiffre le PIN avec
+  AES-GCM 256, clé dérivée HKDF du fingerprint cert HTTPS (secure context
+  requis). localStorage entries `ltr-pin-encrypted` + `ltr-pin-iv`.
+  À l'ouverture suivante de `/login`, si entry présente + fingerprint
+  identique, le PIN est déchiffré et pré-remplit silencieusement les 6 cases
+  (l'utilisateur clique simplement « Se connecter »).
+  **Placeholder V1** : la clé HKDF dérive d'un secret PUBLIC (le
+  fingerprint cert est exposé via `/api/cert-info`). Ne protège donc QUE
+  contre la lecture passive du fichier localStorage par un autre user du
+  même device. À durcir avec WebAuthn ou une `CryptoKey` non-extractable
+  pour V2.
+- **Logout** efface 4 entrées : cookies `ltr_token` + `ltr_remember`,
+  localStorage `ltr-pin-encrypted` + `ltr-pin-iv`.
+
+### Wave 4 — Historique persistant
+
+- **`PeersHistory`** (`infra/peers_history.{hpp,cpp}`) : pattern
+  `KnownPeers`. Stockage `cfgDir/peers_history.json` avec entries
+  `{deviceId, name, platform, kind ("native"|"web"), fingerprint,
+  firstSeen, lastSeen, totalTransfers, totalBytes}`. Hooks AppController :
+  `PeerSeenEvent → touch()` (upsert lastSeen+nom+plateforme),
+  `TransferDoneEvent → recordTransfer(bytes)` (incr compteurs).
+  Purge auto > 30 jours au load (décision BA Q5).
+  Méthode `forget(deviceId)` pour clic-droit « Oublier ce pair ».
+  Méthode `snapshotOffline(minOfflineSec, excludeIds)` pour la sidebar.
+  Test unit `test_peers_history` (7 cas).
+- **`TransferHistory`** (`infra/transfer_history.{hpp,cpp}`) : entries
+  `{sessionId, peerDeviceId, peerName, kind ("tcp-out"|"tcp-in"|
+  "http-up"|"http-down"), fileCount, totalBytes, status (pending|ok|
+  failed|cancelled), startedAt, finishedAt, error}`.
+  **Cap 1000 entries** (drop des plus anciennes si dépassement).
+  **Auto-purge entries > 6 mois** au load. Hooks AppController :
+  `TransferStartedEvent → insert()`, `TransferDone → markDone(Ok)`,
+  `TransferFailed → markDone(Failed/Cancelled)`. Test unit
+  `test_transfer_history` (8 cas dont cap 1000 vérifié à 1500
+  insertions).
+  **Note** : les transferts P2P browser↔browser ne sont **pas** loggés
+  ici — le host ne voit que les signaux, pas les données. Seul le
+  browser garde leur trace dans `transfer_registry.js` (localStorage).
+- **TOFU P2P** côté browser : `p2p.js::handleIncomingOffer` extrait
+  l'empreinte DTLS de la SDP reçue (regex
+  `a=fingerprint:sha-256 ...`), lookup dans IndexedDB store
+  `'ltr-p2p-known-peers'`. 1re fois → set silencieux (TOFU). Match
+  silencieux. Mismatch → toast bloquant `showTofuToast` avec deux
+  actions « Faire confiance » (set + accept) ou « Refuser » (signal
+  `refuse {reason:tofu}` + cleanup). Pas d'auto-dismiss.
+- **UI desktop reportée** : la vue Historique pleine page (Surface 3.A) et
+  la sidebar « Récents (offline) » repliable (Surface 4.B) ne sont **pas**
+  livrées en V1.6.5. Les données sont persistées et accessibles via
+  `controller_.peersHistory()->snapshotOffline(...)` /
+  `controller_.transferHistory()->snapshot()`. Reporté à V1.6.6.
+
+### Endpoints HTTP nouveaux ou modifiés
+
+| Endpoint | Méthode | Wave | Notes |
+|---|---|---|---|
+| `/api/auth` | POST | 3 | Body étendu : `{pin, device_id, remember}`. Si `remember:true` → cookie `ltr_remember` Max-Age 30j. |
+| `/api/auth/refresh` | POST | 3 | NEW. Lit cookie `ltr_remember`, vérifie HMAC, recrée session. 200 + Set-Cookie ltr_token si OK, 401 sinon. |
+| `/api/logout` | POST | 3 | Efface `ltr_token` ET `ltr_remember`. |
+| `/api/download/:id` | GET | 1 | Headers `Accept-Ranges: bytes` toujours. Si `Range: bytes=N-` reçu → 206 + `Content-Range`. |
+| `/api/p2p/signal` | POST | 2 | Whitelist élargie : `ice-restart`, `ice-restart-answer`. |
+
+### Fichiers persistés
+
+| Fichier | Wave | Contenu | Rétention |
+|---|---|---|---|
+| `~/Library/Application Support/LocalTransfer/peers_history.json` | 4 | `{deviceId, name, platform, kind, fingerprint, firstSeen, lastSeen, totalTransfers, totalBytes}` | Auto-purge > 30 j |
+| `~/Library/Application Support/LocalTransfer/transfer_history.json` | 4 | `{sessionId, peerDeviceId, peerName, kind, fileCount, totalBytes, status, startedAt, finishedAt, error}` | Cap 1000 + purge > 6 mois |
+| IndexedDB `ltr-app/ltr-p2p-pending` (browser) | 2 | `{opfsName, peer, fileMeta, bytesWritten, lastAckAt}` | Cleanup à finalize success ou via UI « Annuler » |
+| IndexedDB `ltr-app/ltr-p2p-known-peers` (browser) | 4 | `{fingerprint, name, firstSeen, trustedAt}` keyed by deviceId | Indéfini (manuel via futur « Oublier ce pair P2P ») |
+| `localStorage.ltr-pin-encrypted` + `.ltr-pin-iv` (browser) | 3 | PIN chiffré AES-GCM | Effacé au logout |
+
+### Tests V1.6.5 ajoutés
+
+| Test | Wave | Cas | Score |
+|---|---|---|---|
+| `test_range_parser` | 1 | 11 | OK |
+| `test_persistent_token` | 3 | 9 | OK |
+| `test_peers_history` | 4 | 7 | OK |
+| `test_transfer_history` | 4 | 8 | OK |
+
+**Total tests projet** : 21/21 ✅

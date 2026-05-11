@@ -243,7 +243,7 @@ void IncomingOfferScreen::draw(sf::RenderTarget& target) const {
 
             // Titre row : peer + nom fichier
             Label l1;
-            l1.setText("\xE2\x86\x93 " + entry.senderName + "  \xC2\xB7  "
+            l1.setText("Reception de " + entry.senderName + "  \xC2\xB7  "
                        + entry.firstFileName)
               .setBold(true).setSize(FontSize::body)
               .setColor(Colors::text)
@@ -293,7 +293,7 @@ void IncomingOfferScreen::draw(sf::RenderTarget& target) const {
         // Si plus de 5 entrées, afficher un indicateur.
         if (st.webInbox.size() > static_cast<std::size_t>(maxRows)) {
             Label more;
-            more.setText("\xE2\x80\xA6 et "
+            more.setText("... et "
                 + std::to_string(st.webInbox.size()
                                  - static_cast<std::size_t>(maxRows))
                 + " autre(s) en attente")
@@ -354,7 +354,7 @@ void IncomingOfferScreen::draw(sf::RenderTarget& target) const {
         ? st.pendingWebOffer->senderName
         : st.incomingOffer->senderName;
     Label from;
-    from.setText("de « " + senderName + " »")
+    from.setText("de " + senderName)
         .setSize(FontSize::body)
         .setColor(Colors::textSecondary)
         .setPosition(cardRect_.left + Spacing::xl,
@@ -395,7 +395,7 @@ void IncomingOfferScreen::draw(sf::RenderTarget& target) const {
         s.draw(target);
 
         Label r;
-        r.setText("  • " + st.pendingWebOffer->firstFileName
+            r.setText("  - " + st.pendingWebOffer->firstFileName
                   + (st.pendingWebOffer->filesCount > 1
                      ? ("  (+ " + std::to_string(
                             st.pendingWebOffer->filesCount - 1) + " autre)")
@@ -454,7 +454,7 @@ void IncomingOfferScreen::draw(sf::RenderTarget& target) const {
                 break;
             }
             Label r;
-            r.setText("  • " + f.relativePath)
+            r.setText("  - " + f.relativePath)
              .setSize(FontSize::small)
              .setColor(Colors::textSecondary)
              .setPosition(cardRect_.left + Spacing::xl, ly);

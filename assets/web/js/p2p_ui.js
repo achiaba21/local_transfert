@@ -114,7 +114,7 @@
     const total = state.totalBytes;
     let done;
     if (state.role === 'sender') {
-      done = state.bytesAckedByReceiver || state.bytesSent;
+      done = Math.max(state.bytesSent || 0, state.bytesAckedByReceiver || 0);
     } else {
       done = state.bytesReceived;
     }
@@ -148,7 +148,9 @@
     if (active.length === 0) { bar.hidden = true; return; }
     let totalDone = 0, totalAll = 0;
     active.forEach((s) => {
-      totalDone += (s.role === 'sender' ? s.bytesSent : s.bytesReceived);
+      totalDone += (s.role === 'sender'
+        ? Math.max(s.bytesSent || 0, s.bytesAckedByReceiver || 0)
+        : s.bytesReceived);
       totalAll  += s.totalBytes;
     });
     const pct = totalAll ? Math.floor((totalDone / totalAll) * 100) : 0;

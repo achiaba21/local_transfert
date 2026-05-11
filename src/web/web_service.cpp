@@ -75,6 +75,14 @@ void WebService::start() {
         }
     }
 
+    // V1.6.5 — Sprint Stabilité (Wave 3 item H) : configure le secret HMAC
+    // utilisé pour signer les tokens persistents `ltr_remember`. Source =
+    // fingerprint cert HTTPS (stable tant qu'on régénère pas le cert ;
+    // si le cert change, tous les tokens persistents sont invalidés —
+    // comportement souhaité pour les changements d'IP LAN).
+    sessions_.setHmacSecret(
+        fingerprint_.empty() ? accessPin_ : fingerprint_);
+
     // Enregistrement des routes sur tous les servers (HTTP + HTTPS).
     routes::registerAll(*this);
 
@@ -333,6 +341,16 @@ WebService::acquireCancelFlag(const std::string& sessionId) {
     auto& slot = cancelFlags_[sessionId];
     if (!slot) slot = std::make_shared<std::atomic<bool>>(false);
     return slot;
+}
+
+// V1.6.5 — Sprint Stabilité (Wave 1, item B).
+void WebService::releaseCancelFlag(const std::string& sessionId) {
+    std::lock_guard<std::mutex> lock(cancelMu_);
+    const auto erased = cancelFlags_.erase(sessionId);
+    if (erased > 0) {
+        core::log_info("[cancel-flag-cleanup] sid=" + sessionId.substr(0, 8)
+                       + "... remaining=" + std::to_string(cancelFlags_.size()));
+    }
 }
 
 std::string WebService::localUrl() const {

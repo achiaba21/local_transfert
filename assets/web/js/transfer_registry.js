@@ -20,6 +20,7 @@
 
   const STORAGE_KEY = 'ltr-p2p-history';
   const MAX_ENTRIES = 100;
+  const PENDING_TTL_MS = 24 * 60 * 60 * 1000;
 
   // entries[].id = string unique. Chaque entry représente UN fichier.
   // direction: 'out' (j'envoie) | 'in' (je reçois)
@@ -77,6 +78,10 @@
     let added = 0;
     for (const item of pending) {
       const v = item.value;
+      if (v && v.lastAckAt && (now - v.lastAckAt) > PENDING_TTL_MS) {
+        await removePendingPartial(v).catch(() => {});
+        continue;
+      }
       // Ignore les entrées récentes (< 30s) : peuvent être un transfert
       // actif en cours dans un autre onglet qui sera bientôt finalisé.
       if (!v.lastAckAt || (now - v.lastAckAt) < 30_000) continue;
@@ -92,6 +97,9 @@
         size: v.fileMeta ? v.fileMeta.size : 0,
         status: 'interrupted',  // V1.6.5 — nouveau status
         bytes: v.bytesWritten || 0,
+        resumePct: v.fileMeta && v.fileMeta.size
+          ? Math.floor(((v.bytesWritten || 0) / Math.max(1, v.fileMeta.size)) * 100)
+          : 0,
         error: null,
         opfsName: v.opfsName,    // référence pour récupérer le partial
         createdAt: v.startedAt || v.lastAckAt,
@@ -105,6 +113,18 @@
       render();
       clientLog('info', '[registry] ' + added
                        + ' transfert(s) P2P interrompu(s) détecté(s)');
+    }
+  }
+
+  async function removePendingPartial(entry) {
+    if (!entry || !entry.opfsName) return;
+    try {
+      const root = await navigator.storage.getDirectory();
+      await root.removeEntry(entry.opfsName);
+    } catch {}
+    if (window.LTR.idb) {
+      try { await window.LTR.idb.delete('ltr-p2p-pending', entry.opfsName); }
+      catch {}
     }
   }
 
@@ -198,6 +218,7 @@
       size:          opts.size,
       status:        'pending',
       phase:         'queued',
+      resumePct:     0,
       bytes:         0,
       error:         null,
       createdAt:     Date.now(),
@@ -247,8 +268,15 @@
       return;
     }
     // Marque pending et relance.
-    updateEntry(id, { status: 'pending', error: null, bytes: 0 });
-    window.LTR.p2p.startSendTo(peer, [file]);
+    updateEntry(id, {
+      status: 'pending',
+      phase: 'queued',
+      error: null,
+      bytes: 0,
+      resumePct: 0,
+      finishedAt: null,
+    });
+    window.LTR.p2p.startSendTo(peer, [file], { entryIds: [id] });
   }
 
   function clearAll() {
@@ -338,7 +366,7 @@
       const pct = e.size > 0
         ? Math.floor((e.bytes / e.size) * 100) : 0;
       icon = '<span class="p2p-icon p2p-icon-sending">↻</span>';
-      sub = `${phaseLabel(e.phase)} · ${pct} % · ${peerStr}`;
+      sub = `${phaseLabel(e)} · ${pct} % · ${peerStr}`;
       progress = `<div class="p2p-entry-bar"><span style="width:${pct}%"></span></div>`;
     } else if (e.status === 'sent' || e.status === 'received') {
       icon = '<span class="p2p-icon p2p-icon-done">✓</span>';
@@ -354,7 +382,7 @@
       sub = `Interrompu · ${formatBytes(e.bytes)}/${formatBytes(e.size)} (${pct} %) · ${peerStr}`;
     } else {
       icon = '<span class="p2p-icon p2p-icon-pending">⏱</span>';
-      sub = `${phaseLabel(e.phase)} · ${peerStr}`;
+      sub = `${phaseLabel(e)} · ${peerStr}`;
     }
     let actionBtns = '';
     if (e.status === 'failed' && e.direction === 'out') {
@@ -392,6 +420,9 @@
       'meta':            'Échec annonce',
       'chunk':            'Échec réseau',
       'send':             'Échec envoi',
+      'network_lost':     'Réseau coupé',
+      'peer_closed':      'Pair fermé',
+      'cancelled':        'Transfert annulé',
       'read':             'Lecture impossible',
       'end':              'Échec finalisation',
       'session-meta':     'Échec session',
@@ -408,7 +439,11 @@
     return map[err] || 'Échec ' + err;
   }
 
-  function phaseLabel(phase) {
+  function phaseLabel(entry) {
+    const phase = entry && entry.phase;
+    if (phase === 'resuming' && entry.resumePct > 0) {
+      return 'Reprise depuis ' + entry.resumePct + ' %';
+    }
     const map = {
       queued: 'En attente',
       preparing: 'Préparation',

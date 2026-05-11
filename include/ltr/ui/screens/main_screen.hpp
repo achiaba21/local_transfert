@@ -93,6 +93,7 @@ private:
     SharePanel sharePanel_;
     std::string lastSharePinApplied_;
     std::string lastShareUrlApplied_;
+    std::string lastShareFpApplied_;   // V1.6.4 — Sprint Sécurité
 
     // Offset vertical du début de la liste des pairs (sous la zone Rechercher).
     float     peerListStartY_{0.f};

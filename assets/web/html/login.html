@@ -21,6 +21,21 @@
     Affiché sur <strong id="host-name">cet appareil</strong>
   </p>
 
+  <!-- V1.6.4 — Sprint Sécurité : bandeau de vérification du certificat
+       auto-signé. Visible uniquement en HTTPS, et seulement si l'empreinte
+       n'a pas déjà été acceptée pour ce host (localStorage). -->
+  <section id="cert-banner" class="cert-banner" hidden>
+    <p class="cert-banner-title">Vérifiez l'empreinte du certificat</p>
+    <p class="cert-banner-sub">
+      Comparez avec celle affichée sur l'appareil source.
+    </p>
+    <pre class="cert-fingerprint" id="cert-fingerprint">—</pre>
+    <label class="cert-trust-row">
+      <input type="checkbox" id="cert-trusted">
+      <span>J'ai vérifié cette empreinte</span>
+    </label>
+  </section>
+
   <form id="pin-form" autocomplete="off" novalidate>
     <div class="pin-row" role="group" aria-label="Code à 6 chiffres">
       <input class="pin-input" type="tel" inputmode="numeric" maxlength="1"
@@ -46,10 +61,26 @@
     <p class="error-msg" id="pin-error" hidden>Code incorrect, réessayez.</p>
 
     <button type="submit" class="btn btn-primary btn-login">Se connecter</button>
+
+    <!-- V1.6.5 — Sprint Stabilité (Wave 3) : 2 checkboxes empilées
+         sous le formulaire (UI Surface 1, option A). -->
+    <div class="login-options">
+      <label class="login-opt">
+        <input type="checkbox" id="opt-remember" checked>
+        <span>Se souvenir de cet appareil</span>
+      </label>
+      <label class="login-opt" id="opt-pin-row">
+        <input type="checkbox" id="opt-remember-pin">
+        <span>Mémoriser le PIN</span>
+        <span class="opt-info" title="Le PIN est chiffré localement avec une clé liée au certificat HTTPS de cet appareil. Effacé à la déconnexion.">ⓘ</span>
+      </label>
+    </div>
   </form>
 
 </main>
 
+<script src="/common.js" defer></script>
+<script src="/pin_storage.js" defer></script>
 <script src="/login.js" defer></script>
 </body>
 </html>

@@ -17,10 +17,12 @@ namespace ltr::ui {
 
 namespace {
 
-constexpr float kQrSize        = 220.f;   // V1.1.8-UX4 : 160 → 220
+constexpr float kQrSize        = 180.f;   // V1.6.4 : 220 → 180 pour faire place à l'empreinte
 constexpr float kCopyBtnH      = 32.f;
 constexpr float kCloseBtnSize  = 16.f;
 constexpr unsigned kPinSize    = 44;      // V1.1.8-UX4 : 28 → 44
+constexpr float kFpCopyBtnW    = 76.f;    // V1.6.4 : petit bouton inline « Copier »
+constexpr float kFpCopyBtnH    = 22.f;
 
 float monotonicSeconds() {
     using namespace std::chrono;
@@ -49,6 +51,17 @@ SharePanel::SharePanel() {
                        copiedPinUntil_ = monotonicSeconds() + 2.f;
                    }
                });
+
+    // V1.6.4 — petit bouton inline « Copier » à droite de l'overline EMPREINTE
+    // (full-width écraserait le PIN, panel trop court).
+    copyFpBtn_.setLabel("Copier")
+              .setVariant(Button::Variant::Secondary)
+              .onClick([this]{
+                  if (!fingerprint_.empty()) {
+                      sf::Clipboard::setString(utf8(fingerprint_));
+                      copiedFpUntil_ = monotonicSeconds() + 2.f;
+                  }
+              });
 }
 
 SharePanel& SharePanel::setBounds(const sf::FloatRect& r) {
@@ -64,6 +77,14 @@ SharePanel& SharePanel::setUrl(const std::string& url) {
 
 SharePanel& SharePanel::setPin(const std::string& pin6) {
     pin_ = pin6;
+    return *this;
+}
+
+SharePanel& SharePanel::setFingerprint(const std::string& fp) {
+    if (fp != fingerprint_) {
+        fingerprint_ = fp;
+        layoutChildren();
+    }
     return *this;
 }
 
@@ -108,6 +129,16 @@ void SharePanel::layoutChildren() {
     copyUrlBtn_.setBounds({ left, btn1Y, width, kCopyBtnH });
     const float btn2Y = btn1Y + kCopyBtnH + Spacing::sm;
     copyPinBtn_.setBounds({ left, btn2Y, width, kCopyBtnH });
+
+    // V1.6.4 — Le bouton « Copier » de l'empreinte est positionné en
+    // drawExpanded (alignement sur l'overline EMPREINTE). Ici on lui
+    // donne juste sa taille pour que handleEvent connaisse les bornes.
+    if (!fingerprint_.empty()) {
+        // Le X exact est calculé dans drawExpanded ; on met une valeur
+        // par défaut alignée à droite du panel.
+        const float fpBtnX = bounds_.left + bounds_.width - Spacing::lg - kFpCopyBtnW;
+        copyFpBtn_.setBounds({ fpBtnX, 0.f, kFpCopyBtnW, kFpCopyBtnH });
+    }
 }
 
 sf::FloatRect SharePanel::collapseBtnRect() const {
@@ -142,6 +173,7 @@ void SharePanel::handleEvent(const sf::Event& e) {
     }
     copyUrlBtn_.handleEvent(e);
     copyPinBtn_.handleEvent(e);
+    if (!fingerprint_.empty()) copyFpBtn_.handleEvent(e);
 }
 
 void SharePanel::draw(sf::RenderTarget& target) const {
@@ -239,14 +271,49 @@ void SharePanel::drawExpanded(sf::RenderTarget& target) const {
             .setPosition(bounds_.left + Spacing::lg, pinLabelY + 22.f);
     pinLabel.draw(target);
 
-    // Hint bas
-    const float hintY = pinLabelY + kPinSize + 24.f;
-    Label hint;
-    hint.setText("Scannez le QR ou tapez l'URL.")
-        .setSize(FontSize::small)
-        .setColor(Colors::textSecondary)
-        .setPosition(bounds_.left + Spacing::lg, hintY);
-    hint.draw(target);
+    // V1.6.4 — Section EMPREINTE SHA-256 compacte (HTTPS uniquement).
+    // Overline + bouton « Copier » inline à droite + valeur tronquée
+    // sur 1 ligne (10 octets ~ 30 chars en monospace 11 px).
+    // pinLabelY : Y de l'overline « CODE D'ACCÈS »
+    // pinLabelY + 22 : Y de la valeur PIN (kPinSize=44 px)
+    // → l'empreinte commence 8 px sous la fin du PIN.
+    if (!fingerprint_.empty()) {
+        const float fpLabelY = pinLabelY + 22.f + kPinSize + 8.f;
+
+        Label fpOverline;
+        fpOverline.setText("EMPREINTE SHA-256")
+                  .setBold(true).setSize(FontSize::overline)
+                  .setColor(Colors::textSecondary)
+                  .setPosition(bounds_.left + Spacing::lg, fpLabelY);
+        fpOverline.draw(target);
+
+        // Bouton « Copier » à droite, aligné verticalement sur l'overline.
+        const float fpBtnX = bounds_.left + bounds_.width
+                           - Spacing::lg - kFpCopyBtnW;
+        const float fpBtnY = fpLabelY - 4.f;
+        copyFpBtn_.setBounds({ fpBtnX, fpBtnY, kFpCopyBtnW, kFpCopyBtnH });
+        if (monotonicSeconds() < copiedFpUntil_) {
+            Button ephemeral;
+            ephemeral.setLabel("Copi\xC3\xA9 !")
+                     .setVariant(Button::Variant::Secondary)
+                     .setBounds({ fpBtnX, fpBtnY, kFpCopyBtnW, kFpCopyBtnH })
+                     .setEnabled(false);
+            ephemeral.draw(target);
+        } else {
+            copyFpBtn_.draw(target);
+        }
+
+        // Valeur tronquée (10 octets, soit "AB:CD:EF:GH:IJ:KL:MN:OP:QR:ST…").
+        std::string truncated = fingerprint_.substr(0, std::min<size_t>(29, fingerprint_.size()));
+        if (fingerprint_.size() > 29) truncated += "\xE2\x80\xA6";  // …
+
+        Label fpValue;
+        fpValue.setText(truncated)
+               .setSize(11)
+               .setColor(Colors::text)
+               .setPosition(bounds_.left + Spacing::lg, fpLabelY + 16.f);
+        fpValue.draw(target);
+    }
 }
 
 void SharePanel::drawCollapsed(sf::RenderTarget& target) const {

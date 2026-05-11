@@ -28,6 +28,9 @@ public:
     SharePanel& setBounds(const sf::FloatRect& r);
     SharePanel& setUrl(const std::string& url);      // "http://ip:port"
     SharePanel& setPin(const std::string& pin6);     // "472931"
+    // V1.6.4 — empreinte SHA-256 cert HTTPS, format "AB:CD:..." (32 octets).
+    // Vide → la section empreinte n'est pas dessinée (HTTP plain).
+    SharePanel& setFingerprint(const std::string& fp);
     SharePanel& setQrImage(const sf::Image& img);
 
     // V1.1.8-UX4
@@ -54,12 +57,15 @@ private:
     sf::FloatRect bounds_{};
     std::string   url_;
     std::string   pin_;
+    std::string   fingerprint_;     // V1.6.4
 
     QrCodeView        qr_;
     mutable Button    copyUrlBtn_;
     mutable Button    copyPinBtn_;
+    mutable Button    copyFpBtn_;   // V1.6.4
     mutable float     copiedUrlUntil_{0.f};
     mutable float     copiedPinUntil_{0.f};
+    mutable float     copiedFpUntil_{0.f};  // V1.6.4
 
     bool              collapsed_{false};
     int               visitorCount_{0};

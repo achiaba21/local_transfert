@@ -10,25 +10,31 @@ cmake --build build --config Release -j
 ```
 
 Le premier `cmake -S . -B build` prend **~30 min** car `FetchContent` clone
-SFML (~160 Mo), nlohmann/json, picosha2 et tinyfiledialogs. Les lancements
-suivants sont instantanés grâce au cache.
+SFML (~160 Mo), nlohmann/json, cpp-httplib, picosha2, QR-Code-generator,
+miniz et tinyfiledialogs. Les lancements suivants sont instantanés grâce au
+cache. OpenSSL doit être disponible sur la machine de build.
 
 ## Qu'est-ce que c'est ?
 
-Une application **desktop** qui permet de transférer des fichiers et
-dossiers entre deux machines (Mac / Windows) sur le même réseau local, sans
-configuration et sans cloud.
+Une application **desktop** qui permet de transférer des fichiers et dossiers
+entre machines sur le même réseau local, sans cloud. Les pairs natifs
+macOS/Windows utilisent UDP + TCP direct ; les téléphones, tablettes et autres
+navigateurs passent par l'interface web embarquée, avec transferts host ↔ web
+et web ↔ web via WebRTC DataChannel.
 
 ### Flux utilisateur type
 
-1. L'utilisateur ouvre l'app sur ses deux machines.
+1. L'utilisateur ouvre l'app sur ses deux machines natives, ou ouvre l'URL/QR
+   web depuis un navigateur LAN.
 2. Chaque machine se détecte automatiquement via UDP broadcast.
-3. L'utilisateur sélectionne un destinataire dans la sidebar.
-4. Il clique sur "Parcourir" pour choisir des fichiers ou un dossier.
-5. Il clique sur "ENVOYER".
-6. Le destinataire voit une modale avec un code PIN à vérifier.
-7. Il accepte → transfert TCP direct avec barre de progression.
-8. Les fichiers arrivent dans `~/Downloads/LocalTransfer/`.
+3. Les navigateurs authentifiés par PIN apparaissent aussi comme devices web.
+4. L'utilisateur sélectionne un destinataire dans la sidebar.
+5. Il clique sur "Parcourir", colle depuis le presse-papier ou utilise le web.
+6. Il clique sur "ENVOYER".
+7. Le destinataire accepte si une décision est requise.
+8. Le transfert part en TCP natif, HTTP(S) host ↔ web ou WebRTC web ↔ web.
+9. Les fichiers arrivent dans `~/Downloads/LocalTransfer/` ou dans le
+   navigateur selon le sens du flux.
 
 ## Pourquoi cette stack ?
 
@@ -38,10 +44,11 @@ configuration et sans cloud.
 | **SFML 2.6** (pas 3.0) | 3.0 est trop récent (breaking changes), docs abondantes en 2.6 |
 | **Pas Qt / Dear ImGui** | Contrainte utilisateur : rendu 100 % SFML |
 | **UDP broadcast** (pas mDNS) | Zéro dep externe, suffisant pour un LAN domestique |
-| **Pas de TLS** | LAN de confiance assumé. PIN suffit pour l'appairage. |
+| **HTTPS LAN auto-signé** | Nécessaire pour WebCrypto, clipboard browser et session web persistante ; empreinte affichée pour vérification manuelle. |
+| **TOFU plutôt que PKI** | Modèle local pragmatique : première empreinte connue, warning si changement. |
 | **CMake FetchContent** | Build reproductible sans pré-install de SFML |
 
-## Périmètre V1 (livré)
+## Périmètre livré
 
 - ✅ Découverte auto UDP
 - ✅ Transfert fichiers + dossiers (arborescence préservée)
@@ -50,18 +57,31 @@ configuration et sans cloud.
 - ✅ Progression temps réel (%, vitesse, ETA)
 - ✅ Cross-platform macOS / Windows
 - ✅ UI moderne (coins arrondis, ombres, spacing généreux)
-- ✅ **Interface web embarquée** (port 45456) — tout navigateur LAN
-  peut échanger sans installation. Auto-propagation du binaire par OS.
-  Voir `docs-agents/WEB.md`.
+- ✅ Drag-and-drop et presse-papier natifs selon plateforme
+- ✅ **Interface web embarquée** (HTTP 45456, HTTPS 45457) — tout navigateur
+  LAN peut échanger sans installation.
+- ✅ Transfert host ↔ navigateur via HTTP(S), avec tickets de download
+- ✅ Transfert navigateur ↔ navigateur via WebRTC DataChannel
+- ✅ Certificat HTTPS auto-signé, empreinte affichée et TOFU TCP/P2P
+- ✅ Sessions web plus résilientes : TTL 5 min, cookie persistant optionnel,
+  PIN mémorisable côté navigateur en HTTPS
+- ✅ Mécanismes de reprise partiels : sidecars TCP, retry upload HTTP,
+  Range requests download HTTP, partiels OPFS côté P2P web
+- ✅ Historique persistant des pairs et transferts côté host
 
-## Hors périmètre V1 (repoussé V2)
+Voir `docs-agents/WEB.md` pour le détail de la couche web.
 
-- ❌ Drag-and-drop natif (nécessite code Cocoa + Win32)
-- ❌ Reprise sur interruption (resume)
-- ❌ Chiffrement TLS des chunks
-- ❌ Support mobile iOS / Android
+## Hors périmètre / partiel
+
+- ❌ Vrai resume bout en bout non uniforme : upload HTTP avec offset et
+  renégociation WebRTC DataChannel restent reportés.
+- ❌ Chiffrement bout en bout des chunks TCP natifs. Le TCP natif vérifie
+  l'empreinte du pair via TOFU, mais ne chiffre pas encore le payload.
+- ❌ App native mobile iOS / Android. Les mobiles sont supportés via navigateur.
 - ❌ Notification système native
 - ❌ Deux instances sur la même machine (conflit port UDP)
+- ❌ Vue historique desktop complète et sidebar de pairs récents offline
+  reportées malgré les données persistées.
 
 ## Où trouver quoi
 

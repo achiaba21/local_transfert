@@ -10,16 +10,21 @@ namespace ltr::ui {
 
 namespace {
 
+// V1.6.5+ : sélectionne la police selon bold (vraie Inter Bold au lieu
+// du fake-bold synthétique SFML).
+const sf::Font& fontFor(bool bold) {
+    return bold ? theme_font_bold() : theme_font();
+}
+
 // Mesure brute via SFML — caché dans LabelCache pour éviter la re-créa.
 sf::Vector2f measureRaw(const std::string& text, unsigned size, bool bold) {
     return LabelCache::getOrCompute(
         LabelCache::Key{text, size, bold},
         [&]() -> sf::Vector2f {
             sf::Text t;
-            t.setFont(theme_font());
+            t.setFont(fontFor(bold));
             t.setString(utf8(text));
             t.setCharacterSize(size);
-            if (bold) t.setStyle(sf::Text::Bold);
             const auto b = t.getLocalBounds();
             return {b.width, b.height};
         });
@@ -87,11 +92,10 @@ void Label::draw(sf::RenderTarget& target) const {
     if (rendered.empty()) return;
 
     sf::Text t;
-    t.setFont(theme_font());
+    t.setFont(fontFor(bold_));   // V1.6.5+ : Inter Bold dédiée si bold_
     t.setString(utf8(rendered));
     t.setCharacterSize(size_);
     t.setFillColor(color_);
-    if (bold_) t.setStyle(sf::Text::Bold);
 
     sf::Vector2f position = pos_;
     if (hasBounds_) {

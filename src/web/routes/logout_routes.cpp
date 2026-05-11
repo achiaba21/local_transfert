@@ -12,10 +12,12 @@ namespace ltr::web::routes {
 void registerLogout(WebService& svc) {
     auto server = routes::routerOf(svc);
 
-    // POST /api/logout — idempotent. Invalide la session courante si cookie
-    // valide, efface le cookie navigateur, répond 204.
+    // POST /api/logout — idempotent. Par défaut ferme seulement la session
+    // courante. Avec ?forget=1, efface aussi la connexion persistante.
     server.Post("/api/logout", [&svc](const httplib::Request& req,
                                        httplib::Response& res) {
+        const bool forget = req.has_param("forget")
+            && req.get_param_value("forget") == "1";
         const auto token = readTokenCookie(req);
         if (!token.empty()) {
             const auto sess = svc.sessions().validate(token);
@@ -28,9 +30,13 @@ void registerLogout(WebService& svc) {
             // V1.2 — Sprint Web P2P : annoncer le départ aux autres.
             svc.emitWebPeersToAll();
         }
-        // Suppression du cookie côté navigateur.
+        // Suppression des cookies côté navigateur.
         res.set_header("Set-Cookie",
             "ltr_token=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+        if (forget) {
+            res.set_header("Set-Cookie",
+                "ltr_remember=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+        }
         res.status = 204;
     });
 }

@@ -15,9 +15,11 @@ namespace {
 // V1.2 — Sprint Web P2P
 // Whitelist des `type` autorisés. Empêche un client malicieux d'envoyer
 // des évènements arbitraires via le canal SSE du destinataire.
+// V1.6.5 — Wave 2 item G : ajout de "ice-restart" pour reconnexion auto.
 bool isValidSignalType(const std::string& t) {
-    return t == "offer"   || t == "answer" || t == "ice"
-        || t == "refuse"  || t == "cancel" || t == "bye";
+    return t == "offer"       || t == "answer" || t == "ice"
+        || t == "refuse"      || t == "cancel" || t == "bye"
+        || t == "ice-restart" || t == "ice-restart-answer";
 }
 
 } // namespace

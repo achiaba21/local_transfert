@@ -25,7 +25,8 @@
   // ====================================================================
   // OUTGOING — démarrage d'un envoi A → B
   // ====================================================================
-  async function startSendTo(peer, files) {
+  async function startSendTo(peer, files, opts) {
+    opts = opts || {};
     const T = transport();
     const S = session();
     const U = ui();
@@ -59,10 +60,15 @@
     };
     if (window.LTR.transferRegistry) {
       files.forEach((f, i) => {
-        const id = window.LTR.transferRegistry.addEntry({
-          direction: 'out', peer,
-          name: f.name, size: f.size, file: f,
-        });
+        let id = opts.entryIds && opts.entryIds[i];
+        if (!id) {
+          id = window.LTR.transferRegistry.addEntry({
+            direction: 'out', peer,
+            name: f.name, size: f.size, file: f,
+          });
+        } else {
+          window.LTR.transferRegistry.attachFile(id, f);
+        }
         state.fileStatuses[i].entryId = id;
       });
     }
@@ -118,6 +124,18 @@
       return;
     }
 
+    // V1.6.5 — Wave 2 item G : ice-restart depuis le sender pair
+    // (qui a détecté une déconnexion 5s+). Le receiver applique
+    // setRemoteDescription + createAnswer + envoie ice-restart-answer.
+    if (type === 'ice-restart') {
+      await T.handleIceRestartIncoming(from, payload);
+      return;
+    }
+    if (type === 'ice-restart-answer') {
+      await T.handleIceRestartAnswer(from, payload);
+      return;
+    }
+
     let state = null;
     if (type === 'answer' || type === 'ack' || type === 'refuse') {
       state = T.getConn(from, 'sender');
@@ -159,6 +177,68 @@
     }
   }
 
+  // V1.6.5 — Sprint Stabilité (Wave 4 item L) : TOFU P2P.
+  // Extrait l'empreinte DTLS du SDP (ligne "a=fingerprint:sha-256 AB:CD:...").
+  // Retourne la valeur hex avec ':' (format standard SDP), ou '' si absent.
+  function extractDtlsFingerprint(sdpStr) {
+    if (!sdpStr) return '';
+    const lines = sdpStr.split(/\r?\n/);
+    for (const ln of lines) {
+      const m = ln.match(/^a=fingerprint:sha-256\s+([0-9A-Fa-f:]+)/i);
+      if (m) return m[1].toUpperCase();
+    }
+    return '';
+  }
+
+  // V1.6.5 — Wave 4 item L : vérifie l'identité du pair via IndexedDB.
+  // Retourne :
+  //   - 'new'      : 1re fois, TOFU silencieux (déjà set)
+  //   - 'match'    : OK silencieux
+  //   - 'changed'  : empreinte différente → caller doit afficher toast
+  // Retourne 'unknown' si IndexedDB indispo (skip vérification).
+  async function checkP2pTofu(peer, fingerprint) {
+    if (!window.LTR.idb || !peer || !peer.deviceId || !fingerprint) {
+      return 'unknown';
+    }
+    try {
+      const prev = await window.LTR.idb.get('ltr-p2p-known-peers', peer.deviceId);
+      const now = Date.now();
+      if (!prev) {
+        await window.LTR.idb.set('ltr-p2p-known-peers', peer.deviceId, {
+          fingerprint,
+          name: peer.displayName || '',
+          firstSeen: now,
+          trustedAt: now,
+        });
+        clientLog('info', '[tofu-p2p] nouveau pair '
+                          + peer.deviceId.substring(0, 8) + ' fp='
+                          + fingerprint.substring(0, 23) + '...');
+        return 'new';
+      }
+      if (prev.fingerprint === fingerprint) return 'match';
+      // Mismatch — on NE met PAS à jour (laisse le toast décider).
+      return 'changed';
+    } catch (e) {
+      clientLog('warn', '[tofu-p2p] check failed: ' + (e && e.message));
+      return 'unknown';
+    }
+  }
+
+  // V1.6.5 — Wave 4 item L : enregistre le nouveau fingerprint comme trusted.
+  // Appelé quand l'utilisateur clique « Faire confiance » dans le toast.
+  async function trustP2pPeer(peer, fingerprint) {
+    if (!window.LTR.idb || !peer || !peer.deviceId || !fingerprint) return;
+    try {
+      const prev = await window.LTR.idb.get('ltr-p2p-known-peers', peer.deviceId);
+      await window.LTR.idb.set('ltr-p2p-known-peers', peer.deviceId, {
+        fingerprint,
+        name: peer.displayName || (prev && prev.name) || '',
+        firstSeen: (prev && prev.firstSeen) || Date.now(),
+        trustedAt: Date.now(),
+      });
+    } catch {}
+  }
+
   async function handleIncomingOffer(peer, payload) {
     const T = transport();
     const S = session();
@@ -189,6 +269,35 @@
         S.cleanup(state, 'Expiré');
       }
     }, ACCEPT_TTL_MS);
+
+    // V1.6.5 — Sprint Stabilité (Wave 4 item L) : vérification TOFU P2P.
+    // Extrait fingerprint DTLS depuis SDP, lookup IndexedDB. Si changé →
+    // toast bloquant avec actions « Faire confiance » / « Refuser ».
+    const sdpStr = (payload.sdp && payload.sdp.sdp) || payload.sdp || '';
+    const peerFp = extractDtlsFingerprint(sdpStr);
+    const tofu = await checkP2pTofu(peer, peerFp);
+    if (tofu === 'changed') {
+      clientLog('warn', '[tofu-p2p] empreinte CHANGÉE pour '
+                        + peer.deviceId.substring(0, 8));
+      // Toast bloquant.
+      const decision = await new Promise((resolve) => {
+        if (U && U.showTofuToast) {
+          U.showTofuToast(peer.displayName || peer.deviceId, resolve);
+        } else {
+          // Fallback : confirm() basique.
+          const ok = confirm("L'identité de « "
+            + (peer.displayName || peer.deviceId)
+            + " » a changé. Faire confiance ?");
+          resolve(ok ? 'trust' : 'refuse');
+        }
+      });
+      if (decision !== 'trust') {
+        await T.postSignal(peer.deviceId, 'refuse', { reason: 'tofu' });
+        S.cleanup(state, 'Refusé (identité)');
+        return;
+      }
+      await trustP2pPeer(peer, peerFp);
+    }
 
     U.showIncomingModal(peer, async (accepted) => {
       clearTimeout(state.ttlTimer);

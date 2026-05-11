@@ -15,18 +15,32 @@
   // attend un choix de destination (Host ou peer P2P) avant envoi.
   // Map<stagingId, { file, li, sent }>
   const staging = new Map();
+  function profile() { return window.LTR.webProfile; }
   function stagingId() {
     return 'st-' + Date.now().toString(36)
          + '-' + Math.random().toString(36).slice(2, 6);
   }
 
   function init() {
+    restoreDrafts();
     setupDropZone();
     setupFileInputChange('#file-input');
     setupFileInputChange('#folder-input');
     setupFolderButtonVisibility();
     setupPasteButton();
     setupPasteEvent();
+  }
+
+  function restoreDrafts() {
+    if (!profile()) return;
+    const drafts = profile().get('drafts', []) || [];
+    if (drafts.length === 0) return;
+    const list = document.getElementById('upload-list');
+    if (!list) return;
+    drafts.forEach((d) => {
+      const li = renderDraftRow(d);
+      list.appendChild(li);
+    });
   }
 
   // V1.4.2 — Stratégie en 2 couches pour le presse-papier web :
@@ -279,8 +293,25 @@
       const id = stagingId();
       const li = renderStagingRow(id, f);
       document.getElementById('upload-list').appendChild(li);
-      staging.set(id, { file: f, li, sent: false });
+      const draftId = profile() ? profile().addDraft(f) : null;
+      staging.set(id, { file: f, li, sent: false, draftId });
     }
+  }
+
+  function renderDraftRow(draft) {
+    const li = document.createElement('li');
+    li.className = 'upload-row staging-row upload-row-draft';
+    li.dataset.draftId = draft.id || '';
+    li.innerHTML = `
+      <span class="f-icon">${iconFor(draft.name || 'fichier')}</span>
+      <span class="f-name">${escapeHtml(draft.name || 'fichier')}</span>
+      <span class="f-size">À re-sélectionner · ${formatBytes(draft.size || 0)}</span>
+      <button type="button" class="btn-ghost remove-btn" aria-label="Retirer" title="Retirer">\u2715</button>`;
+    li.querySelector('.remove-btn').addEventListener('click', () => {
+      if (profile()) profile().removeDraft(draft.id);
+      li.remove();
+    });
+    return li;
   }
 
   function renderStagingRow(id, file) {
@@ -322,6 +353,7 @@
       try { URL.revokeObjectURL(e.li.dataset.thumbUrl); } catch (err) {}
     }
     if (e.li && e.li.parentNode) e.li.parentNode.removeChild(e.li);
+    if (e.draftId && profile()) profile().removeDraft(e.draftId);
     staging.delete(id);
   }
 
@@ -362,9 +394,13 @@
     if (!e || e.sent) return;
     if (dest === 'host') {
       e.sent = true;
+      if (profile()) profile().set('ui.lastDestination', 'host');
+      if (e.draftId && profile()) profile().removeDraft(e.draftId);
       sendToHost(e);
     } else {
       e.sent = true;
+      if (profile()) profile().set('ui.lastDestination', dest);
+      if (e.draftId && profile()) profile().removeDraft(e.draftId);
       sendToPeer(e, dest);
     }
   }
@@ -434,10 +470,15 @@
     setTimeout(() => removeStaging(entry.li.dataset.stagingId), 4000);
   }
 
-  function uploadOne(file, li, uploadId) {
+  // V1.6.5 — Sprint Stabilité (Wave 1, item C).
+  // Tente 1 upload via XMLHttpRequest. Promise<{status, ok}>.
+  // - status 200 : ok=true
+  // - status 401 : ok=false, redirect /login (par appelant)
+  // - autre 4xx/5xx : ok=false, retry possible (par appelant)
+  // - erreur réseau (xhr.onerror) : ok=false, retry possible
+  function tryUploadOnce(file, li, uploadId) {
     return new Promise((resolve) => {
       const progressEl = li.querySelector('[data-role="progress"]');
-      progressEl.textContent = '0 %';
 
       const fd = new FormData();
       fd.append('file', file);
@@ -455,22 +496,65 @@
         progressEl.textContent =
           Math.round((e.loaded / e.total) * 100) + ' %';
       };
-      xhr.onload = () => {
-        if (xhr.status === 200) {
+      xhr.onload = () => resolve({ status: xhr.status, ok: xhr.status === 200 });
+      xhr.onerror = () => resolve({ status: 0, ok: false });
+      xhr.onabort = () => resolve({ status: 0, ok: false });
+      xhr.send(fd);
+    });
+  }
+
+  // V1.6.5 — orchestrateur retry. 3 tentatives avec backoff exponentiel
+  // 1s/2s/4s. Sur échec final : affiche bouton « Reprendre » qui relance.
+  // Sur 401 : redirige immédiatement vers /login (pas de retry).
+  // Note : le serveur ne supporte PAS encore le resume avec offset
+  // (V1.6.6). Chaque retry repart from scratch — utile uniquement pour
+  // les coupures réseau brèves (< ~7s cumulés) ou les 5xx transitoires.
+  function uploadOne(file, li, uploadId) {
+    return new Promise(async (resolve) => {
+      const progressEl = li.querySelector('[data-role="progress"]');
+      progressEl.textContent = '0 %';
+      const delays = [1000, 2000, 4000];
+      let lastStatus = 0;
+
+      for (let attempt = 0; attempt <= delays.length; attempt++) {
+        if (attempt > 0) {
+          progressEl.textContent = '⏳ retry ' + attempt + '/3…';
+          await new Promise((r) => setTimeout(r, delays[attempt - 1]));
+          progressEl.textContent = '0 %';
+        }
+        const r = await tryUploadOnce(file, li, uploadId);
+        lastStatus = r.status;
+        if (r.ok) {
           progressEl.textContent = '✓ envoyé';
           setTimeout(() => li.remove(), 4000);
-        } else if (xhr.status === 401) {
-          goToLogin();
-        } else {
-          progressEl.textContent = '✗ échec (' + xhr.status + ')';
+          resolve();
+          return;
         }
-        resolve();
+        if (r.status === 401) {
+          goToLogin();
+          resolve();
+          return;
+        }
+        // 4xx (sauf 401) : pas de retry (erreur cliente définitive)
+        if (r.status >= 400 && r.status < 500) break;
+      }
+
+      // Échec final : bouton « Reprendre » manuel.
+      progressEl.innerHTML = '';
+      const span = document.createElement('span');
+      span.textContent = lastStatus === 0
+        ? '✗ erreur réseau · '
+        : ('✗ échec (' + lastStatus + ') · ');
+      const btn = document.createElement('button');
+      btn.textContent = '↻ Reprendre';
+      btn.className = 'btn-resume-upload';
+      btn.onclick = () => {
+        progressEl.textContent = '0 %';
+        uploadOne(file, li, uploadId);  // récursif, nouveau cycle 3 retries
       };
-      xhr.onerror = () => {
-        progressEl.textContent = '✗ erreur réseau';
-        resolve();
-      };
-      xhr.send(fd);
+      progressEl.appendChild(span);
+      progressEl.appendChild(btn);
+      resolve();
     });
   }
 

@@ -3,6 +3,7 @@
 #include "ltr/core/logger.hpp"
 #include "ltr/core/shell_open.hpp"
 #include "ltr/core/types.hpp"
+#include "ltr/infra/crypto_identity.hpp"   // V1.6.4 — Sprint Sécurité
 #include "ltr/infra/filesystem_service.hpp"
 #include "ltr/ui/clipboard_paste.hpp"
 
@@ -28,6 +29,31 @@ std::string lastPathComponent(const std::filesystem::path& p) {
     const auto pos = s.find_last_of("/\\");
     const auto name = (pos == std::string::npos) ? s : s.substr(pos + 1);
     return name.empty() ? p.string() : name;
+}
+
+std::string hostFromUrl(const std::string& url) {
+    const auto scheme = url.find("://");
+    const auto start = scheme == std::string::npos ? 0 : scheme + 3;
+    const auto end = url.find('/', start);
+    return url.substr(start, end == std::string::npos ? std::string::npos
+                                                      : end - start);
+}
+
+std::string preferredWebBaseUrl(const web::WebService& web) {
+    const auto http = web.localUrl();
+    if (http.empty()) return {};
+    if (web.portHttps() == 0) return http;
+    const auto host = hostFromUrl(http);
+    const auto colon = host.rfind(':');
+    const auto ip = colon == std::string::npos ? host : host.substr(0, colon);
+    if (ip.empty()) return http;
+    return "https://" + ip + ":" + std::to_string(web.portHttps());
+}
+
+std::string webLoginUrl(const web::WebService& web) {
+    const auto base = preferredWebBaseUrl(web);
+    if (base.empty()) return {};
+    return base + "/login?pin=" + web.accessPin() + "&autologin=1";
 }
 
 // V1.4 — Sprint Clipboard Paste : helpers (avant start() qui les utilise).
@@ -99,11 +125,32 @@ AppController::~AppController() {
 }
 
 void AppController::start() {
+    // V1.6.4 — Sprint Sécurité (Wave 2 TOFU TCP).
+    // Charge l'empreinte stable de cette instance et le registre TOFU
+    // des pairs déjà rencontrés. Doit être fait AVANT la construction
+    // de TransferServer/Client.
+    selfFingerprint_ = infra::loadOrGenerateSelfFingerprint(
+        infra::Config::configDir(), state_.self.id);
+    knownPeers_ = std::make_unique<infra::KnownPeers>(
+        infra::Config::configDir() / "known_peers.json");
+    knownPeers_->load();
+
+    // V1.6.5 — Sprint Stabilité (Wave 4 items J + K).
+    // Charge l'historique des pairs et des transferts. Purge auto au load
+    // (peers > 30j, transfers > 6 mois).
+    peersHistory_ = std::make_unique<infra::PeersHistory>(
+        infra::Config::configDir() / "peers_history.json");
+    peersHistory_->load();
+    transferHistory_ = std::make_unique<infra::TransferHistory>(
+        infra::Config::configDir() / "transfer_history.json");
+    transferHistory_->load();
+
     discovery_ = std::make_unique<network::DiscoveryService>(bus_, state_.self);
     server_    = std::make_unique<network::TransferServer>(
         bus_, state_.self, cfg_.downloadDir, core::kTransferPort,
-        cfg_.resumeSidecarTtlHours);
-    client_    = std::make_unique<network::TransferClient>(bus_, state_.self);
+        cfg_.resumeSidecarTtlHours, selfFingerprint_);
+    client_    = std::make_unique<network::TransferClient>(
+        bus_, state_.self, knownPeers_.get());
     web_       = std::make_unique<web::WebService>(
         bus_, state_.self, cfg_.downloadDir, cfg_.webAnnounceTimeoutSec);
     // V1.6.4 — Sprint Sécurité : active HTTPS via cert auto-signé
@@ -705,9 +752,10 @@ void AppController::probePeer(const std::string& ipv4) {
 AppController::WebShareInfo AppController::webShareInfo() const {
     WebShareInfo info;
     if (!web_) return info;
-    info.url  = web_->localUrl();
+    info.url  = webLoginUrl(*web_);
     info.pin  = web_->accessPin();
     info.port = web_->port();
+    info.fingerprint = web_->fingerprint();
     return info;
 }
 
@@ -720,7 +768,25 @@ void AppController::onEvent(const core::Event& ev) {
             auto it = std::find_if(peers.begin(), peers.end(),
                 [&](const domain::Device& d){ return d.id == e.device.id; });
             if (it == peers.end()) peers.push_back(e.device);
-            else                   *it = e.device;
+            else {
+                // V1.6.4 : on préserve le flag fingerprintWarning à travers
+                // les rafraîchissements de PeerSeen (sinon chaque beacon
+                // l'effacerait).
+                const bool wasWarning = it->fingerprintWarning;
+                *it = e.device;
+                it->fingerprintWarning = wasWarning || e.device.fingerprintWarning;
+            }
+            // V1.6.5 — Wave 4 item J : upsert dans peers_history.json.
+            if (peersHistory_) {
+                const auto kindStr = (e.device.kind == domain::PeerKind::Web)
+                                        ? "web" : "native";
+                std::string fp;
+                if (knownPeers_) {
+                    if (auto k = knownPeers_->get(e.device.id)) fp = *k;
+                }
+                peersHistory_->touch(e.device.id, e.device.name,
+                                      e.device.platform, kindStr, fp);
+            }
         }
         else if constexpr (std::is_same_v<T, core::PeerLostEvent>) {
             auto& peers = state_.peers;
@@ -775,6 +841,24 @@ void AppController::onEvent(const core::Event& ev) {
                     + ")");
             }
         }
+        else if constexpr (std::is_same_v<T, core::FingerprintChangedEvent>) {
+            // V1.6.4 — Sprint Sécurité (Wave 2 TOFU TCP).
+            // Empreinte du pair changée par rapport au known_peers.json.
+            // Marque le pair en warning pour affichage UI inline (⚠ orange
+            // dans la sidebar). Non-bloquant : le transfert continue.
+            for (auto& p : state_.peers) {
+                if (p.id == e.peerId) {
+                    p.fingerprintWarning = true;
+                    break;
+                }
+            }
+            core::log_warn("[tofu] FingerprintChangedEvent peerId="
+                + e.peerId.substr(0, 8)
+                + " ancienne=" + (e.oldFingerprint.empty()
+                                   ? std::string{"<vide>"}
+                                   : e.oldFingerprint.substr(0, 23) + "...")
+                + " nouvelle=" + e.newFingerprint.substr(0, 23) + "...");
+        }
         else if constexpr (std::is_same_v<T, core::OfferAnsweredEvent>) {
             for (auto& t : state_.transfers) {
                 if (t.sessionId != e.sessionId) continue;
@@ -790,6 +874,26 @@ void AppController::onEvent(const core::Event& ev) {
                 if (t.sessionId != e.sessionId) continue;
                 if (t.status == domain::TransferStatus::Pending)
                     t.status = domain::TransferStatus::WaitingAcceptance;
+            }
+            // V1.6.5 — Wave 4 item K : insère dans transfer_history.
+            if (transferHistory_) {
+                infra::TransferHistory::Entry h;
+                h.sessionId = e.sessionId;
+                // Recherche les métadonnées dans state_.transfers (déjà créées
+                // par requestSend ou WebUploadStartedEvent).
+                for (const auto& t : state_.transfers) {
+                    if (t.sessionId != e.sessionId) continue;
+                    h.peerDeviceId = t.peerId;
+                    h.peerName     = t.peerName;
+                    h.fileCount    = static_cast<int>(t.sourcePaths.size());
+                    h.totalBytes   = t.totalBytes;
+                    h.kind = (t.direction == app::TransferDirection::Outgoing)
+                        ? infra::TransferHistory::Kind::TcpOut
+                        : infra::TransferHistory::Kind::TcpIn;
+                    break;
+                }
+                h.status = infra::TransferHistory::Status::Pending;
+                transferHistory_->insert(h);
             }
         }
         else if constexpr (std::is_same_v<T, core::TransferProgressEvent>) {
@@ -808,11 +912,24 @@ void AppController::onEvent(const core::Event& ev) {
             }
         }
         else if constexpr (std::is_same_v<T, core::TransferDoneEvent>) {
+            std::uint64_t bytesDone = 0;
+            std::string peerIdDone;
             for (auto& t : state_.transfers) {
                 if (t.sessionId == e.sessionId) {
                     t.status = domain::TransferStatus::Done;
                     t.terminalAt = std::chrono::steady_clock::now();
+                    bytesDone = t.bytesTransferred > 0
+                        ? t.bytesTransferred : t.totalBytes;
+                    peerIdDone = t.peerId;
                 }
+            }
+            // V1.6.5 — Wave 4 items J + K : finalize history.
+            if (transferHistory_) {
+                transferHistory_->markDone(e.sessionId,
+                    infra::TransferHistory::Status::Ok, bytesDone);
+            }
+            if (peersHistory_ && !peerIdDone.empty()) {
+                peersHistory_->recordTransfer(peerIdDone, bytesDone);
             }
             // V1.1 : auto-clean des fichiers envoyés pour cette session.
             auto it = sessionPaths_.find(e.sessionId);
@@ -846,6 +963,7 @@ void AppController::onEvent(const core::Event& ev) {
             }
         }
         else if constexpr (std::is_same_v<T, core::TransferFailedEvent>) {
+            std::uint64_t bytesAtFail = 0;
             for (auto& t : state_.transfers) {
                 if (t.sessionId != e.sessionId) continue;
                 // V1.1 : statut Expired si reason == "expired",
@@ -859,6 +977,7 @@ void AppController::onEvent(const core::Event& ev) {
                     t.status = domain::TransferStatus::Failed;
                 }
                 t.error  = e.reason;
+                bytesAtFail = t.bytesTransferred;
 
                 // V1.1.9 : classifier + marquer resumable selon category.
                 switch (e.category) {
@@ -884,6 +1003,15 @@ void AppController::onEvent(const core::Event& ev) {
                 if (t.status != domain::TransferStatus::Expired) {
                     t.terminalAt = std::chrono::steady_clock::now();
                 }
+            }
+            // V1.6.5 — Wave 4 item K : finalize history (failed/cancelled).
+            if (transferHistory_) {
+                const auto status = (e.reason == "cancelled" ||
+                                     e.category == core::ErrorCategory::Cancelled)
+                    ? infra::TransferHistory::Status::Cancelled
+                    : infra::TransferHistory::Status::Failed;
+                transferHistory_->markDone(e.sessionId, status,
+                                            bytesAtFail, e.reason);
             }
             // Ne pas auto-clean en cas d'échec : le fichier reste disponible
             // pour retry.

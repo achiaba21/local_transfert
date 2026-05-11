@@ -71,10 +71,29 @@ ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/p2p_ui.js
                P2pUiJs "application/javascript; charset=utf-8" p2p_ui_js)
 ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/transfer_registry.js
                TransferRegistryJs "application/javascript; charset=utf-8" transfer_registry_js)
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/share.js
+               ShareJs "application/javascript; charset=utf-8" share_js)
+# V1.6.5 — Wave 2 item E : wrapper IndexedDB minimal
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/idb.js
+               IdbJs "application/javascript; charset=utf-8" idb_js)
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/web_profile.js
+               WebProfileJs "application/javascript; charset=utf-8" web_profile_js)
+# V1.6.5 — Wave 3 item I : stockage chiffré du PIN (WebCrypto AES-GCM)
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/pin_storage.js
+               PinStorageJs "application/javascript; charset=utf-8" pin_storage_js)
 ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/login.js
                LoginJs "application/javascript; charset=utf-8" login_js)
 ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/css/style.css
                StyleCss "text/css; charset=utf-8" style_css)
+
+# V1.6.6+ — Polices Geist copiées dans le dossier de build (cohérence
+# Mac+Win, sans embed binaire qui faisait exploser le compile time —
+# le script EmbedFile.cmake en hex est O(N²) sur les fichiers > 100 KB).
+# theme.cpp les charge ensuite via sf::Font::loadFromFile en cherchant
+# en priorité dans le cwd "assets/fonts/" puis fallback système.
+file(COPY ${CMAKE_SOURCE_DIR}/assets/fonts/Geist-Regular.ttf
+          ${CMAKE_SOURCE_DIR}/assets/fonts/Geist-Bold.ttf
+     DESTINATION ${CMAKE_BINARY_DIR}/assets/fonts)
 ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/icons/upload.svg
                IconUpload "image/svg+xml" icon_upload)
 ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/icons/download.svg
@@ -113,6 +132,10 @@ set(LTR_WEB_GEN_HEADERS
     ${p2p_session_js_GEN}
     ${p2p_ui_js_GEN}
     ${transfer_registry_js_GEN}
+    ${share_js_GEN}
+    ${idb_js_GEN}
+    ${web_profile_js_GEN}
+    ${pin_storage_js_GEN}
     ${login_js_GEN}
     ${style_css_GEN}
     ${icon_upload_GEN}
@@ -155,6 +178,10 @@ add_library(ltr_core STATIC
     src/infra/filesystem_service.cpp
     src/infra/hash_service.cpp
     src/infra/resume_sidecar.cpp
+    src/infra/known_peers.cpp        # V1.6.4 — Wave 2 TOFU TCP
+    src/infra/crypto_identity.cpp    # V1.6.4 — Wave 2 TOFU TCP
+    src/infra/peers_history.cpp      # V1.6.5 — Wave 4 item J
+    src/infra/transfer_history.cpp   # V1.6.5 — Wave 4 item K
     src/app/app_controller.cpp
     # --- couche web ---
     src/web/http_server.cpp
@@ -162,6 +189,7 @@ add_library(ltr_core STATIC
     src/web/web_session_store.cpp
     src/web/display_name.cpp
     src/web/cert_manager.cpp
+    src/web/range_parser.cpp           # V1.6.5 — Wave 1 item D
     src/web/download_ticket_store.cpp
     src/web/sse_channel.cpp
     src/web/sse_broadcaster.cpp
@@ -178,6 +206,7 @@ add_library(ltr_core STATIC
     src/web/routes/events_routes.cpp
     src/web/routes/p2p_routes.cpp
     src/web/routes/self_routes.cpp
+    src/web/routes/share_routes.cpp
     src/web/routes/static_routes.cpp
 )
 target_include_directories(ltr_core PUBLIC include ${LTR_WEB_GEN_DIR})

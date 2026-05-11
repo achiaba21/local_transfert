@@ -2,41 +2,76 @@
 
 #include <httplib.h>
 
-#include <unistd.h>
+#include <chrono>
 #include <cstdio>
-#include <cstdlib>
+#include <filesystem>
 #include <fstream>
+#include <random>
 #include <string>
+#include <system_error>
 
 #include "ltr/core/logger.hpp"
 
 namespace ltr::web {
+
+namespace {
+
+// V1.6.4 audit fix — cross-platform : remplace `mkstemp` + path "/tmp/..."
+// hardcodé par std::filesystem::temp_directory_path() (Mac : /tmp,
+// Windows : %TEMP%, Linux : /tmp ou $TMPDIR).
+std::filesystem::path makeTempPath(const std::string& prefix) {
+    namespace fs = std::filesystem;
+    static thread_local std::mt19937_64 rng{
+        static_cast<std::uint64_t>(std::chrono::steady_clock::now()
+            .time_since_epoch().count())};
+    std::error_code ec;
+    fs::path dir = fs::temp_directory_path(ec);
+    if (ec || dir.empty()) dir = fs::path("."); // fallback ultime
+    return dir / (prefix + "-" + std::to_string(rng()) + ".pem");
+}
+
+// Écriture binaire complète avec contrôle de l'état du flux (corrige le
+// `write()` POSIX return value ignored signalé par l'audit).
+bool writeFileFull(const std::filesystem::path& p, const std::string& data) {
+    std::ofstream ofs(p, std::ios::binary | std::ios::trunc);
+    if (!ofs) return false;
+    ofs.write(data.data(), static_cast<std::streamsize>(data.size()));
+    ofs.close();
+    return ofs.good();
+}
+
+} // namespace
 
 HttpServer::HttpServer()
     : server_(std::make_unique<httplib::Server>()) {}
 
 // V1.6.4 — Sprint Sécurité : constructeur HTTPS via SSLServer.
 // cpp-httplib SSLServer prend des chemins de fichiers, pas des PEM en
-// mémoire. On écrit dans /tmp puis on instancie.
+// mémoire. On écrit dans le dossier temp système (cross-platform) puis
+// on instancie. Les fichiers sont supprimés immédiatement après que
+// SSLServer ait chargé les PEM en RAM.
 HttpServer::HttpServer(const std::string& certPem, const std::string& keyPem) {
-    // Écrit cert+key dans /tmp pour que cpp-httplib les charge (mode 0600).
-    char certPath[] = "/tmp/ltr-cert-XXXXXX";
-    char keyPath[]  = "/tmp/ltr-key-XXXXXX";
-    int fd1 = mkstemp(certPath);
-    int fd2 = mkstemp(keyPath);
-    if (fd1 < 0 || fd2 < 0) {
-        core::log_error("HttpServer SSL: mkstemp failed");
+    namespace fs = std::filesystem;
+    const auto certPath = makeTempPath("ltr-cert");
+    const auto keyPath  = makeTempPath("ltr-key");
+
+    if (!writeFileFull(certPath, certPem) || !writeFileFull(keyPath, keyPem)) {
+        core::log_error("HttpServer SSL: écriture PEM temp échouée");
+        std::error_code ec;
+        fs::remove(certPath, ec);
+        fs::remove(keyPath, ec);
         server_ = std::make_unique<httplib::Server>();
-        if (fd1 >= 0) close(fd1);
-        if (fd2 >= 0) close(fd2);
         return;
     }
-    write(fd1, certPem.data(), certPem.size()); close(fd1);
-    write(fd2, keyPem.data(), keyPem.size()); close(fd2);
-    server_ = std::make_unique<httplib::SSLServer>(certPath, keyPath);
-    // Cleanup les fichiers temp après instantiation (le server a chargé en RAM).
-    std::remove(certPath);
-    std::remove(keyPath);
+
+    server_ = std::make_unique<httplib::SSLServer>(
+        certPath.string().c_str(), keyPath.string().c_str());
+
+    // Cleanup les fichiers temp (SSLServer a chargé en RAM).
+    std::error_code ec;
+    fs::remove(certPath, ec);
+    fs::remove(keyPath, ec);
+
     if (!static_cast<httplib::SSLServer*>(server_.get())->is_valid()) {
         core::log_error("HttpServer SSL: SSLServer is_valid()=false");
     } else {

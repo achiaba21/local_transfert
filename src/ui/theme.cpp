@@ -24,48 +24,91 @@ const sf::Color Colors::shadow        {  0,   0,   0,  25};
 
 namespace {
 
-sf::Font loadFontImpl() {
+// V1.6.6+ : Geist copiée dans <build>/assets/fonts/ par CMake. Recherche
+// dans cet ordre :
+//   1) "assets/fonts/{name}" relatif au cwd (cas exe lancé depuis build/)
+//   2) Inter local si présent (fallback historique)
+//   3) Polices système OS
+sf::Font loadFontImpl(std::initializer_list<const char*> bundledPaths,
+                      std::initializer_list<const char*> systemPaths,
+                      const char* logName) {
     sf::Font font;
 
-    // 1) Police fournie dans assets/
-    const std::array<const char*, 2> bundled = {
-        "assets/fonts/Inter-Regular.ttf",
-        "assets/fonts/Inter-Bold.ttf",
-    };
-    for (const auto* p : bundled) {
-        if (std::filesystem::exists(p) && font.loadFromFile(p)) return font;
+    for (const auto* p : bundledPaths) {
+        if (p && std::filesystem::exists(p) && font.loadFromFile(p)) {
+            core::log_info(std::string("[font] ") + logName
+                           + " chargé : " + p);
+            return font;
+        }
     }
 
-    // 2) Polices système courantes.
-    const std::array<const char*, 6> sys = {
-#ifdef __APPLE__
-        "/System/Library/Fonts/SFNS.ttf",
-        "/System/Library/Fonts/Helvetica.ttc",
-        "/Library/Fonts/Arial.ttf",
-#elif defined(_WIN32)
-        "C:\\Windows\\Fonts\\segoeui.ttf",
-        "C:\\Windows\\Fonts\\arial.ttf",
-        "C:\\Windows\\Fonts\\tahoma.ttf",
-#else
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/TTF/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-#endif
-        nullptr, nullptr, nullptr,
-    };
-    for (const auto* p : sys) {
-        if (p && std::filesystem::exists(p) && font.loadFromFile(p)) return font;
+    for (const auto* p : systemPaths) {
+        if (p && std::filesystem::exists(p) && font.loadFromFile(p)) {
+            core::log_warn(std::string("[font] ") + logName
+                           + " fallback système : " + p);
+            return font;
+        }
     }
 
-    core::log_error("Impossible de charger une police. "
-                    "Placez Inter-Regular.ttf dans assets/fonts/");
+    core::log_error(std::string("[font] aucune police chargée pour ")
+                    + logName);
     return font;
+}
+
+sf::Font loadRegular() {
+    return loadFontImpl(
+        { "assets/fonts/Geist-Regular.ttf",
+          "../assets/fonts/Geist-Regular.ttf",
+          "assets/fonts/Inter-Regular.ttf",
+          "../assets/fonts/Inter-Regular.ttf" },
+        {
+#ifdef __APPLE__
+            "/System/Library/Fonts/SFNS.ttf",
+            "/System/Library/Fonts/Helvetica.ttc",
+            "/Library/Fonts/Arial.ttf",
+#elif defined(_WIN32)
+            "C:\\Windows\\Fonts\\segoeui.ttf",
+            "C:\\Windows\\Fonts\\arial.ttf",
+            "C:\\Windows\\Fonts\\tahoma.ttf",
+#else
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/TTF/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+#endif
+        },
+        "Regular");
+}
+
+sf::Font loadBold() {
+    return loadFontImpl(
+        { "assets/fonts/Geist-Bold.ttf",
+          "../assets/fonts/Geist-Bold.ttf",
+          "assets/fonts/Inter-Bold.ttf",
+          "../assets/fonts/Inter-Bold.ttf" },
+        {
+#ifdef __APPLE__
+            "/System/Library/Fonts/HelveticaNeue.ttc",
+            "/System/Library/Fonts/Helvetica.ttc",
+#elif defined(_WIN32)
+            "C:\\Windows\\Fonts\\segoeuib.ttf",
+            "C:\\Windows\\Fonts\\arialbd.ttf",
+#else
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+#endif
+        },
+        "Bold");
 }
 
 } // namespace
 
 const sf::Font& theme_font() {
-    static sf::Font font = loadFontImpl();
+    static sf::Font font = loadRegular();
+    return font;
+}
+
+const sf::Font& theme_font_bold() {
+    static sf::Font font = loadBold();
     return font;
 }
 

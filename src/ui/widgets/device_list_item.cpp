@@ -14,6 +14,7 @@ constexpr float kStatusDotSize = 12.f;
 constexpr float kPillW         = 46.f;
 constexpr float kPillH         = 18.f;
 constexpr float kCheckRadius   = 10.f;
+constexpr float kFpWarnSize    = 18.f;   // V1.6.4 — disque ⚠ TOFU
 } // namespace
 
 void DeviceListItem::handleEvent(const sf::Event& e) {
@@ -99,6 +100,27 @@ void DeviceListItem::draw(sf::RenderTarget& target) const {
                         .draw(tt);
                 })
                 .layout(r, t);
+        })
+        // V1.6.4 — Sprint Sécurité (Wave 2 TOFU TCP).
+        // Indicateur ⚠ orange si l'empreinte du pair a changé. Disque
+        // warning + glyph « ! » blanc bold centré. Taille 18×18.
+        .fixed(device_.fingerprintWarning ? kFpWarnSize + Spacing::sm : 0.f,
+               [this](sf::RenderTarget& t, const sf::FloatRect& r) {
+            if (!device_.fingerprintWarning) return;
+            const float cx = r.left + kFpWarnSize / 2.f;
+            const float cy = r.top + r.height / 2.f;
+            sf::CircleShape disk(kFpWarnSize / 2.f);
+            disk.setOrigin(kFpWarnSize / 2.f, kFpWarnSize / 2.f);
+            disk.setPosition(cx, cy);
+            disk.setFillColor(Colors::warning);
+            t.draw(disk);
+            Label{}
+                .setText("!")
+                .setBold(true).setSize(FontSize::small)
+                .setColor(sf::Color::White)
+                .setBounds({r.left, r.top, kFpWarnSize, r.height})
+                .setAlignment(Label::Alignment::Center)
+                .draw(t);
         })
         .fixed(kPillW, [this](sf::RenderTarget& t,
                                 const sf::FloatRect& r) {

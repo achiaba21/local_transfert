@@ -1,6 +1,12 @@
 #include "ltr/web/web_session_store.hpp"
 
+#include <chrono>
+#include <cstdint>
 #include <random>
+#include <sstream>
+#include <string>
+
+#include <picosha2.h>
 
 #include "ltr/core/types.hpp"
 #include "ltr/domain/device.hpp"
@@ -202,6 +208,126 @@ WebSessionStore::findTokenByDeviceId(const std::string& deviceId) const {
     const auto it = deviceToToken_.find(deviceId);
     if (it == deviceToToken_.end()) return std::nullopt;
     return it->second;
+}
+
+// =============================================================
+// V1.6.5 — Sprint Stabilité (Wave 3 item H) : token persistent HMAC.
+// =============================================================
+
+void WebSessionStore::setHmacSecret(std::string secret) {
+    std::lock_guard<std::mutex> lock(mu_);
+    hmacSecret_ = std::move(secret);
+}
+
+std::string WebSessionStore::pinHash8(const std::string& pin) const {
+    const auto full = picosha2::hash256_hex_string(pin);
+    return full.substr(0, 8);
+}
+
+// HMAC-SHA-256 manuel (construction RFC 2104) basée sur picosha2.
+// blockSize SHA-256 = 64 octets. ipad=0x36, opad=0x5C.
+std::string WebSessionStore::hmacSha256Hex(const std::string& key,
+                                            const std::string& message) const {
+    constexpr std::size_t kBlockSize = 64;
+    std::string k = key;
+    if (k.size() > kBlockSize) {
+        // Hash de la clé si trop longue (puis bourrage à 64).
+        std::vector<unsigned char> kHash(picosha2::k_digest_size);
+        picosha2::hash256(k.begin(), k.end(), kHash.begin(), kHash.end());
+        k.assign(kHash.begin(), kHash.end());
+    }
+    if (k.size() < kBlockSize) k.resize(kBlockSize, '\0');
+
+    std::string ipad(kBlockSize, '\0'), opad(kBlockSize, '\0');
+    for (std::size_t i = 0; i < kBlockSize; ++i) {
+        ipad[i] = static_cast<char>(k[i] ^ 0x36);
+        opad[i] = static_cast<char>(k[i] ^ 0x5C);
+    }
+    // inner = SHA-256(ipad || message)
+    std::string innerInput = ipad + message;
+    std::vector<unsigned char> innerHash(picosha2::k_digest_size);
+    picosha2::hash256(innerInput.begin(), innerInput.end(),
+                      innerHash.begin(), innerHash.end());
+    // outer = SHA-256(opad || innerHash)
+    std::string outerInput = opad
+        + std::string(innerHash.begin(), innerHash.end());
+    return picosha2::hash256_hex_string(outerInput);
+}
+
+std::string WebSessionStore::makePersistentToken(
+        const std::string& deviceId,
+        const std::string& currentPin,
+        std::int64_t expEpochSeconds) const {
+    const auto pinH8 = pinHash8(currentPin);
+    const std::string payload = deviceId + "."
+                              + std::to_string(expEpochSeconds) + "."
+                              + pinH8;
+    std::string secret;
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        secret = hmacSecret_;
+    }
+    const auto sig = hmacSha256Hex(secret, payload);
+    return payload + "." + sig;
+}
+
+std::optional<std::string>
+WebSessionStore::verifyPersistentToken(const std::string& token,
+                                       const std::string& currentPin) const {
+    // Format attendu : "{deviceId}.{exp}.{pinHash8}.{hmac}"
+    // 3 séparateurs '.', 4 segments. deviceId = UUID v4 → 36 chars
+    // (peut contenir des '-' mais pas de '.'). pinHash8 = 8 hex chars.
+    // hmac = 64 hex chars.
+    std::vector<std::string> parts;
+    {
+        std::stringstream ss(token);
+        std::string part;
+        while (std::getline(ss, part, '.')) parts.push_back(part);
+    }
+    if (parts.size() != 4) return std::nullopt;
+    const auto& deviceId = parts[0];
+    const auto& expStr   = parts[1];
+    const auto& pinH8    = parts[2];
+    const auto& sig      = parts[3];
+    if (deviceId.empty() || pinH8.size() != 8 || sig.size() != 64) {
+        return std::nullopt;
+    }
+    std::int64_t expSec = 0;
+    try {
+        expSec = std::stoll(expStr);
+    } catch (...) {
+        return std::nullopt;
+    }
+    const auto nowSec = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    if (nowSec >= expSec) return std::nullopt;  // expiré
+
+    // Vérif pinHash8 actuel
+    if (pinHash8(currentPin) != pinH8) return std::nullopt;
+
+    // Vérif HMAC
+    std::string secret;
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        secret = hmacSecret_;
+    }
+    const auto payload = deviceId + "." + expStr + "." + pinH8;
+    const auto expectedSig = hmacSha256Hex(secret, payload);
+
+    // V1.6.5 audit fix : compare constant-time pour éviter une
+    // timing-attack théorique sur le cookie 30j. Le `==` court-circuite
+    // au 1er char divergent → un attaquant pourrait deviner le HMAC
+    // octet par octet via mesures de latence (low signal en pratique
+    // sur LAN, mais correctness > KISS pour de la crypto).
+    if (expectedSig.size() != sig.size()) return std::nullopt;
+    unsigned char diff = 0;
+    for (std::size_t i = 0; i < expectedSig.size(); ++i) {
+        diff |= static_cast<unsigned char>(
+                    expectedSig[i] ^ sig[i]);
+    }
+    if (diff != 0) return std::nullopt;
+
+    return deviceId;
 }
 
 } // namespace ltr::web
