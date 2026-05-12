@@ -5,6 +5,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <system_error>
 
 #include <httplib.h>
@@ -17,22 +18,21 @@
 #include "ltr/web/routes/multi_server.hpp"
 #include "ltr/web/web_service.hpp"
 
+// Assets embedded — pas de fs::ifstream au runtime, fonctionne aussi
+// quand le binaire est lancé hors du dossier projet.
+#include "ltr/web/assets/deposit_html.hpp"
+#include "ltr/web/assets/deposit_expired_html.hpp"
+#include "ltr/web/assets/deposit_receipt_html.hpp"
+
 namespace ltr::web::routes {
 
 namespace {
 
-// Lit le contenu d'un fichier statique depuis assets/web/html/ et le sert.
-// Retourne false si le fichier n'a pas pu être lu.
-bool serveStaticHtml(const std::string& relPath,
-                     httplib::Response& res) {
-    const std::string fullPath = std::string("assets/web/html/") + relPath;
-    std::ifstream in(fullPath);
-    if (!in) return false;
-    std::ostringstream ss;
-    ss << in.rdbuf();
+void serveEmbeddedHtml(std::string_view bytes,
+                       std::string_view mime,
+                       httplib::Response& res) {
     res.set_header("Cache-Control", "no-store");
-    res.set_content(ss.str(), "text/html; charset=utf-8");
-    return true;
+    res.set_content(bytes.data(), bytes.size(), std::string(mime).c_str());
 }
 
 std::string mapReasonToMessage(const std::string& reason) {
@@ -52,21 +52,24 @@ std::string mapReasonToMessage(const std::string& reason) {
 void registerDeposit(WebService& svc) {
     auto server = routes::routerOf(svc);
 
+    using namespace ltr::web::assets;
     server.Get(R"(/deposit/([A-Za-z0-9_\-]+))",
         [&svc](const httplib::Request& req, httplib::Response& res) {
             const auto token = req.matches[1].str();
             auto* links = svc.depositLinks();
             if (!links) {
                 res.status = 500;
-                serveStaticHtml("deposit_expired.html", res);
+                serveEmbeddedHtml(DepositExpiredHtml,
+                                   DepositExpiredHtmlMime, res);
                 return;
             }
             auto link = links->findByToken(token);
             if (!link || !links->isActive(*link)) {
-                serveStaticHtml("deposit_expired.html", res);
+                serveEmbeddedHtml(DepositExpiredHtml,
+                                   DepositExpiredHtmlMime, res);
                 return;
             }
-            serveStaticHtml("deposit.html", res);
+            serveEmbeddedHtml(DepositHtml, DepositHtmlMime, res);
         });
 
     server.Get("/api/deposit/info",

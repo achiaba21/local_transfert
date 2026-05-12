@@ -30,6 +30,12 @@
 #include "ltr/web/assets/icon_upload.hpp"
 #include "ltr/web/assets/icon_download.hpp"
 #include "ltr/web/assets/icon_file.hpp"
+// Phase 2 — Portail Client Externe : assets embedded.
+#include "ltr/web/assets/deposit_html.hpp"
+#include "ltr/web/assets/deposit_expired_html.hpp"
+#include "ltr/web/assets/deposit_receipt_html.hpp"
+#include "ltr/web/assets/deposit_js.hpp"
+#include "ltr/web/assets/host_deposit_links_js.hpp"
 
 namespace ltr::web::routes {
 
@@ -156,6 +162,21 @@ void registerStatic(WebService& svc) {
     server.Get("/style.css", [](const httplib::Request&, httplib::Response& res) {
         serveStatic(res, StyleCss, StyleCssMime);
     });
+
+    // Phase 2 — Portail Client Externe : assets servis aux déposants
+    // externes (page publique, pas d'auth) et au dashboard host
+    // (admin des liens de dépôt).
+    server.Get("/deposit.js", [](const httplib::Request&, httplib::Response& res) {
+        serveStatic(res, DepositJs, DepositJsMime);
+    });
+    server.Get("/host_deposit_links.js",
+        [](const httplib::Request&, httplib::Response& res) {
+            serveStatic(res, HostDepositLinksJs, HostDepositLinksJsMime);
+        });
+    server.Get("/deposit-receipt",
+        [](const httplib::Request&, httplib::Response& res) {
+            serveNoCache(res, DepositReceiptHtml, DepositReceiptHtmlMime);
+        });
     server.Get("/icons/upload.svg", [](const httplib::Request&, httplib::Response& res) {
         serveStatic(res, IconUpload, IconUploadMime);
     });
