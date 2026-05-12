@@ -173,6 +173,33 @@
     setTimeout(() => { c.hidden = true; }, 3000);
   }
 
+  function diagnosticText(reason) {
+    const text = String(reason || '');
+    if (text.includes('route') || text.includes('Pas de route')) {
+      return 'Les deux appareils ne sont probablement pas sur le même réseau local, ou le Wi‑Fi bloque les connexions directes.';
+    }
+    if (text.includes('Wi-Fi') || text.includes('réseau') || text.includes('DataChannel')) {
+      return 'Le réseau a été coupé ou instable pendant le transfert. Rapproche les appareils du Wi‑Fi puis relance.';
+    }
+    if (text.includes('Hors-ligne') || text.includes('fermée') || text.includes('muet')) {
+      return 'L’autre appareil a fermé la page, s’est verrouillé, ou a perdu la session. Ouvre LocalTransfer dessus puis réessaie.';
+    }
+    return 'Le P2P a échoué. Vérifie que les deux appareils sont sur le même Wi‑Fi, sans VPN ni partage de connexion isolant les clients.';
+  }
+
+  function showDiagnostic(reason) {
+    const box = $('#p2p-diagnostic');
+    const text = $('#p2p-diagnostic-text');
+    if (!box || !text) return;
+    text.textContent = diagnosticText(reason);
+    box.hidden = false;
+    const close = $('#p2p-diagnostic-close');
+    if (close && !close.dataset.wired) {
+      close.dataset.wired = '1';
+      close.addEventListener('click', () => { box.hidden = true; });
+    }
+  }
+
   // ================ V1.6.5 — Toast bloquant TOFU P2P (Wave 4 item L) ================
   // Affiche un toast warning persistant avec 2 boutons. callback reçoit
   // 'trust' ou 'refuse'. Pas d'auto-dismiss : l'utilisateur DOIT décider.
@@ -225,7 +252,7 @@
     showIncomingModal, processModalQueue,
     markCardSending, setCardPhase, updateProgress,
     refreshSticky, showSticky,
-    toast, showTofuToast, cssEscape,
+    toast, showTofuToast, showDiagnostic, cssEscape,
     ACCEPT_TTL_MS,
   };
 })();

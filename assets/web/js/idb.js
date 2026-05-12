@@ -7,10 +7,11 @@
 //   - delete(store, key)      → Promise<void>
 //   - all(store)              → Promise<Array<{key, value}>>
 //
-// Stores créés à l'ouverture (DB v1) :
+// Stores créés à l'ouverture :
 //   - 'ltr-p2p-pending'        : transferts P2P interrompus (Wave 2)
 //   - 'ltr-p2p-known-peers'    : TOFU P2P, fingerprints DTLS connus (Wave 4)
 //   - 'ltr-web-profile'        : préférences locales UX web
+//   - 'ltr-web-inbox'          : fichiers reçus conservés en local
 //
 // Pas de dépendance externe — API native (CLAUDE.md).
 // ============================================================
@@ -18,11 +19,12 @@
   'use strict';
 
   const DB_NAME = 'ltr-app';
-  const DB_VERSION = 2;
+  const DB_VERSION = 3;
   const STORES = [
     'ltr-p2p-pending',
     'ltr-p2p-known-peers',
     'ltr-web-profile',
+    'ltr-web-inbox',
   ];
 
   let dbPromise = null;

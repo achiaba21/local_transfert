@@ -3,6 +3,7 @@
 #include <map>
 #include <mutex>
 #include <optional>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -32,6 +33,10 @@ public:
 
     WebSessionStore(const WebSessionStore&)            = delete;
     WebSessionStore& operator=(const WebSessionStore&) = delete;
+
+    // Configure le fichier JSON de persistance des alias web.
+    // Format : { "aliases": { "<deviceId>": "Serge" } }
+    void setCustomNamesPath(std::filesystem::path path);
 
     // Vérifie le PIN fourni et, si OK, crée une session pour ce navigateur.
     // `deviceId` doit être un UUID stable fourni par le navigateur (localStorage).
@@ -120,11 +125,14 @@ private:
     // HMAC-SHA-256 retourne hex string (64 chars).
     std::string hmacSha256Hex(const std::string& key,
                               const std::string& message) const;
+    void loadCustomNamesLocked();
+    void saveCustomNamesLocked() const;
 
     mutable std::mutex mu_;
     std::map<std::string, WebSession> sessions_;        // token → session
     std::map<std::string, std::string> deviceToToken_;  // deviceId → token
     std::map<std::string, std::string> customNames_;    // deviceId → alias
+    std::filesystem::path customNamesPath_;
     std::string hmacSecret_;                            // V1.6.5 Wave 3
 };
 

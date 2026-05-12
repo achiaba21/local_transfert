@@ -2,12 +2,15 @@
 
 #include <chrono>
 #include <cstdint>
+#include <fstream>
 #include <random>
 #include <sstream>
 #include <string>
 
 #include <picosha2.h>
+#include <nlohmann/json.hpp>
 
+#include "ltr/core/logger.hpp"
 #include "ltr/core/types.hpp"
 #include "ltr/domain/device.hpp"
 #include "ltr/web/display_name.hpp"
@@ -128,6 +131,7 @@ std::optional<std::string> WebSessionStore::authenticate(
         std::lock_guard<std::mutex> lock(mu_);
         if (!cleanedCustom.empty()) {
             customNames_[deviceId] = cleanedCustom;
+            saveCustomNamesLocked();
         } else {
             const auto ci = customNames_.find(deviceId);
             if (ci != customNames_.end()) storedCustom = ci->second;
@@ -150,6 +154,12 @@ std::optional<std::string> WebSessionStore::authenticate(
     return token;
 }
 
+void WebSessionStore::setCustomNamesPath(std::filesystem::path path) {
+    std::lock_guard<std::mutex> lock(mu_);
+    customNamesPath_ = std::move(path);
+    loadCustomNamesLocked();
+}
+
 bool WebSessionStore::updateCustomName(const std::string& token,
                                        const std::string& customName) {
     const auto cleaned = cleanCustomName(customName);
@@ -158,12 +168,69 @@ bool WebSessionStore::updateCustomName(const std::string& token,
     if (it == sessions_.end()) return false;
     if (cleaned.empty()) customNames_.erase(it->second.deviceId);
     else customNames_[it->second.deviceId] = cleaned;
+    saveCustomNamesLocked();
 
     const auto dn = DisplayName::fromDeviceIdAndUA(
         it->second.deviceId, it->second.userAgent);
     it->second.customName = cleaned;
     it->second.displayName = composeDisplayName(dn.name, cleaned);
     return true;
+}
+
+void WebSessionStore::loadCustomNamesLocked() {
+    namespace fs = std::filesystem;
+    customNames_.clear();
+    if (customNamesPath_.empty()) return;
+    std::error_code ec;
+    if (!fs::exists(customNamesPath_, ec)) return;
+
+    std::ifstream ifs(customNamesPath_);
+    if (!ifs) {
+        core::log_warn("[web_aliases] impossible d'ouvrir "
+                       + customNamesPath_.string());
+        return;
+    }
+    try {
+        const auto j = nlohmann::json::parse(ifs);
+        const auto aliases = j.value("aliases", nlohmann::json::object());
+        for (auto it = aliases.begin(); it != aliases.end(); ++it) {
+            if (!it.value().is_string()) continue;
+            const auto cleaned = cleanCustomName(it.value().get<std::string>());
+            if (!cleaned.empty()) customNames_[it.key()] = cleaned;
+        }
+        core::log_info("[web_aliases] chargé "
+                       + std::to_string(customNames_.size()) + " alias");
+    } catch (const std::exception& e) {
+        core::log_warn(std::string("[web_aliases] JSON invalide: ")
+                       + e.what());
+    }
+}
+
+void WebSessionStore::saveCustomNamesLocked() const {
+    namespace fs = std::filesystem;
+    if (customNamesPath_.empty()) return;
+    std::error_code ec;
+    fs::create_directories(customNamesPath_.parent_path(), ec);
+
+    nlohmann::json aliases = nlohmann::json::object();
+    for (const auto& [deviceId, name] : customNames_) {
+        if (!name.empty()) aliases[deviceId] = name;
+    }
+    nlohmann::json root;
+    root["aliases"] = aliases;
+
+    const auto tmp = customNamesPath_.string() + ".tmp";
+    std::ofstream ofs(tmp, std::ios::trunc);
+    if (!ofs) {
+        core::log_error("[web_aliases] impossible d'écrire " + tmp);
+        return;
+    }
+    ofs << root.dump(2);
+    ofs.close();
+    fs::rename(tmp, customNamesPath_, ec);
+    if (ec) {
+        core::log_error("[web_aliases] rename échoué: " + ec.message());
+    }
 }
 
 std::optional<WebSession> WebSessionStore::validate(

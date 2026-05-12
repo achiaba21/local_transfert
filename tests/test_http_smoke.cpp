@@ -12,8 +12,10 @@
 #include <chrono>
 #include <cstring>
 #include <filesystem>
+#include <future>
 #include <iostream>
 #include <thread>
+#include <variant>
 
 int main() {
     // Prépare un downloadDir temporaire.
@@ -128,6 +130,53 @@ int main() {
             {137, 80, 78, 71, 13, 10, 26, 10};
         assert(qrRes->body.size() > sizeof(sig));
         assert(std::memcmp(qrRes->body.data(), sig, sizeof(sig)) == 0);
+    }
+
+    // 8) Announce dossier web : multi-fichiers + relativePath,
+    // affichage host = nom du dossier, puis acceptation manuelle.
+    {
+        httplib::Headers h{{"Cookie", "ltr_token=" + authCookie},
+                           {"Content-Type", "application/json"}};
+        nlohmann::json body;
+        body["bundleKind"] = "folder";
+        body["bundleName"] = "Photos";
+        body["files"] = nlohmann::json::array({
+            {{"name", "a.jpg"}, {"size", 10}, {"relativePath", "Photos/a.jpg"}},
+            {{"name", "b.jpg"}, {"size", 20}, {"relativePath", "Photos/sub/b.jpg"}},
+        });
+
+        auto fut = std::async(std::launch::async, [&] {
+            return cli.Post("/api/upload-announce", h,
+                            body.dump(), "application/json");
+        });
+
+        std::string uploadId;
+        for (int i = 0; i < 30 && uploadId.empty(); ++i) {
+            for (const auto& ev : bus.drain()) {
+                if (const auto* offer =
+                        std::get_if<ltr::core::WebIncomingOfferEvent>(&ev)) {
+                    uploadId = offer->uploadId;
+                    assert(offer->filesCount == 2);
+                    assert(offer->totalBytes == 30);
+                    assert(offer->firstFileName == "Photos");
+                }
+            }
+            if (uploadId.empty()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+        }
+        assert(!uploadId.empty());
+        const auto snap = svc.announces().peek(uploadId);
+        assert(snap.has_value());
+        assert(snap->files.size() == 2);
+        assert(snap->files[1].relativePath == "Photos/sub/b.jpg");
+        assert(svc.announces().resolveAccept(uploadId, tmp));
+
+        auto res = fut.get();
+        assert(res);
+        assert(res->status == 200);
+        auto j = nlohmann::json::parse(res->body);
+        assert(j["accepted"] == true);
     }
 
     svc.stop();

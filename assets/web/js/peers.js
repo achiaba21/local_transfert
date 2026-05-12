@@ -70,12 +70,22 @@
     $('#self-peer-sub').textContent = selfInfo.platformLabel || '';
   }
 
-  async function renameSelf() {
+  function setEditing(editing) {
+    const edit = $('#self-peer-edit');
+    const form = $('#self-peer-form');
+    const input = $('#self-peer-input');
+    if (!edit || !form || !input) return;
+    edit.hidden = editing;
+    form.hidden = !editing;
+    if (editing) {
+      input.value = selfInfo ? (selfInfo.customName || '') : '';
+      input.focus();
+      input.select();
+    }
+  }
+
+  async function saveSelfName(customName) {
     if (!selfInfo) return;
-    const current = selfInfo.customName || '';
-    const next = window.prompt('Nom sur ce navigateur', current);
-    if (next === null) return;
-    const customName = next.trim();
     try {
       const resp = await fetch('/api/me/name', {
         method: 'POST',
@@ -95,6 +105,7 @@
         else localStorage.removeItem(CUSTOM_NAME_KEY);
       } catch (e) {}
       renderSelf();
+      setEditing(false);
     } catch (e) {
       clientLog('error', '[peers] renameSelf failed: ' + (e && e.message));
       if (window.LTR.p2p && window.LTR.p2p.toast) {
@@ -148,7 +159,17 @@
       pickerInputEl.value = '';
     });
     const edit = $('#self-peer-edit');
-    if (edit) edit.addEventListener('click', renameSelf);
+    if (edit) edit.addEventListener('click', () => setEditing(true));
+    const cancel = $('#self-peer-cancel');
+    if (cancel) cancel.addEventListener('click', () => setEditing(false));
+    const form = $('#self-peer-form');
+    if (form) {
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const input = $('#self-peer-input');
+        saveSelfName(input ? input.value.trim() : '');
+      });
+    }
     clientLog('info', '[peers] init OK');
   }
 

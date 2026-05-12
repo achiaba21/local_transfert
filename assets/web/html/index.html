@@ -33,7 +33,52 @@
     <span class="logout-icon" aria-hidden="true">×</span>
     <span class="logout-label">Oublier</span>
   </button>
+  <button class="header-action-btn" id="host-deposit-tab-btn"
+          aria-label="Liens de dépôt" title="Liens de dépôt"
+          onclick="document.getElementById('host-deposit-section').scrollIntoView({behavior:'smooth'});">
+    <span class="header-action-icon" aria-hidden="true">📥</span>
+    <span class="header-action-label">Dépôts</span>
+  </button>
 </header>
+
+<section id="host-deposit-section" class="host-deposit-section" hidden>
+  <h2>Liens de dépôt</h2>
+  <div class="host-deposit-list" id="host-deposit-list"></div>
+  <form class="host-deposit-form" id="host-deposit-form" autocomplete="off">
+    <h3>Nouveau lien</h3>
+    <label>Libellé
+      <input type="text" name="label" maxlength="80" required>
+    </label>
+    <label>Expiration
+      <select name="expiry">
+        <option value="1h">1 heure</option>
+        <option value="24h">24 heures</option>
+        <option value="7d" selected>7 jours</option>
+        <option value="30d">30 jours</option>
+        <option value="never">Sans expiration</option>
+      </select>
+    </label>
+    <label>Taille max par dépôt (Mo)
+      <input type="number" name="maxMb" min="0" value="2048">
+    </label>
+    <label>Nombre max de fichiers
+      <input type="number" name="maxFiles" min="0" value="50">
+    </label>
+    <label>Texte de consentement
+      <textarea name="consentText" rows="3"
+        >J'accepte que mes fichiers soient transmis.</textarea>
+    </label>
+    <button type="submit" class="btn btn-primary">Créer le lien</button>
+  </form>
+</section>
+<script src="/host_deposit_links.js"></script>
+<script>
+(function(){
+  const btn = document.getElementById('host-deposit-tab-btn');
+  const sec = document.getElementById('host-deposit-section');
+  if (btn && sec) btn.addEventListener('click', () => { sec.hidden = false; });
+})();
+</script>
 
 <main class="app-main" role="main">
 
@@ -65,6 +110,12 @@
         <button type="button" class="btn-ghost self-peer-edit" id="self-peer-edit">
           Modifier
         </button>
+        <form class="self-peer-form" id="self-peer-form" hidden>
+          <input type="text" id="self-peer-input" maxlength="32"
+                 autocomplete="nickname" aria-label="Nom sur ce navigateur">
+          <button type="submit" class="btn btn-primary">OK</button>
+          <button type="button" class="btn-ghost" id="self-peer-cancel">Annuler</button>
+        </form>
       </div>
       <ul class="peers-list" id="peers-list" role="listbox"
           aria-label="Liste des autres appareils connectés"></ul>
@@ -110,8 +161,14 @@
       <!-- Colonne REÇUS -->
       <section class="col col-recv" aria-labelledby="recv-title">
         <h2 id="recv-title" class="overline">
-          Reçus du host · <span id="recv-count">0</span>
+          Reçus · <span id="recv-count">0</span>
         </h2>
+        <div class="inbox-toolbar">
+          <span id="inbox-storage">Stockage : —</span>
+          <button type="button" class="btn-ghost" id="inbox-clear">
+            Nettoyer
+          </button>
+        </div>
         <ul class="download-list" id="download-list">
           <li class="empty-state">Aucun fichier reçu pour le moment.</li>
         </ul>
@@ -177,6 +234,15 @@
 <!-- Toast non bloquant (refus, erreurs ICE). -->
 <div class="p2p-toast" id="p2p-toast" hidden role="status"
      aria-live="polite"></div>
+
+<section class="p2p-diagnostic" id="p2p-diagnostic" hidden role="status"
+         aria-live="polite">
+  <div>
+    <strong>Diagnostic réseau P2P</strong>
+    <p id="p2p-diagnostic-text">…</p>
+  </div>
+  <button type="button" class="btn-ghost" id="p2p-diagnostic-close">×</button>
+</section>
 
 <div class="share-modal" id="share-modal" hidden role="dialog"
      aria-labelledby="share-title" aria-modal="true">

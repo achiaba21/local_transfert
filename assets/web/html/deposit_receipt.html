@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Reçu de dépôt</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+@media print {
+  body { background: #fff; }
+  .deposit-receipt-page { box-shadow: none; }
+  .no-print { display: none; }
+}
+</style>
+</head>
+<body class="page-deposit">
+
+<main class="deposit-receipt-page">
+  <header>
+    <span class="deposit-receipt-check" aria-hidden="true">✓</span>
+    <h1>Dépôt enregistré</h1>
+    <p id="receipt-meta">…</p>
+  </header>
+
+  <section>
+    <h2>Fichiers transmis</h2>
+    <ul id="receipt-files" class="deposit-receipt-files"></ul>
+    <p id="receipt-total">—</p>
+  </section>
+
+  <section>
+    <h2>Authenticité</h2>
+    <p>Identifiant : <code id="receipt-id">—</code></p>
+    <p class="deposit-receipt-sig">Signature : <code id="receipt-sig">—</code></p>
+  </section>
+
+  <p class="no-print deposit-receipt-actions">
+    <button type="button" onclick="window.print()">Imprimer ce reçu</button>
+  </p>
+</main>
+
+<script>
+(async () => {
+  const id = new URLSearchParams(location.search).get('id');
+  if (!id) return;
+  try {
+    const r = await fetch('/api/deposit/receipt/' + encodeURIComponent(id));
+    if (!r.ok) throw new Error('not found');
+    const j = await r.json();
+    document.getElementById('receipt-meta').textContent =
+      'Pour ' + (j.linkLabel || '') + ' — ' +
+      new Date(j.createdAt * 1000).toLocaleString();
+    const list = document.getElementById('receipt-files');
+    for (const f of (j.files || [])) {
+      const li = document.createElement('li');
+      li.textContent = f.name + ' — ' + f.size + ' octets';
+      list.appendChild(li);
+    }
+    document.getElementById('receipt-total').textContent =
+      (j.files || []).length + ' fichier(s), ' + j.totalBytes + ' octets au total';
+    document.getElementById('receipt-id').textContent = j.id;
+    document.getElementById('receipt-sig').textContent =
+      (j.signature || '').substring(0, 32) + '…';
+  } catch (e) {
+    document.body.innerHTML =
+      '<main class="deposit-expired"><h1>Reçu introuvable</h1>' +
+      '<p>Le reçu demandé n\'existe pas ou a été supprimé.</p></main>';
+  }
+})();
+</script>
+
+</body>
+</html>

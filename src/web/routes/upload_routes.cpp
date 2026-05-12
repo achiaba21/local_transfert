@@ -14,6 +14,7 @@
 #include "ltr/core/types.hpp"
 #include "ltr/domain/transfer_request.hpp"
 #include "ltr/infra/filesystem_service.hpp"
+#include "ltr/infra/quota_service.hpp"
 #include "ltr/web/routes/route_helpers.hpp"
 #include "ltr/web/web_service.hpp"
 #include "ltr/web/routes/multi_server.hpp"
@@ -84,6 +85,48 @@ std::string sanitizeRelativePath(const std::string& raw) {
         out += segment;
     }
     return out;
+}
+
+} // namespace
+
+namespace {
+
+class QuotaReservationGuard {
+public:
+    QuotaReservationGuard(infra::TransferQuota* quota,
+                          std::string id,
+                          infra::TransferFlow flow,
+                          std::uint64_t expectedBytes)
+        : quota_(quota), id_(std::move(id)) {
+        if (!quota_) return;
+        decision_ = quota_->tryReserve(id_, flow, expectedBytes);
+        active_ = decision_.allowed;
+    }
+
+    ~QuotaReservationGuard() {
+        if (quota_ && active_) quota_->release(id_);
+    }
+
+    bool allowed() const noexcept { return decision_.allowed; }
+    const infra::QuotaDecision& decision() const noexcept { return decision_; }
+
+    void commit(std::uint64_t actualBytes) {
+        if (!quota_ || !active_) return;
+        quota_->commit(id_, actualBytes);
+        active_ = false;
+    }
+
+private:
+    infra::TransferQuota* quota_{nullptr};
+    std::string id_;
+    bool active_{false};
+    infra::QuotaDecision decision_;
+};
+
+std::uint64_t announcedTotalBytes(const AnnounceSnapshot& snap) {
+    std::uint64_t total = 0;
+    for (const auto& f : snap.files) total += f.size;
+    return total;
 }
 
 } // namespace
@@ -258,6 +301,15 @@ void registerUpload(WebService& svc) {
         const auto targetDir  = anPtr->targetDir;
         const auto snap       = *anPtr;
 
+        QuotaReservationGuard quotaGuard(
+            svc.quota(), uploadId, infra::TransferFlow::HttpUp,
+            announcedTotalBytes(snap));
+        if (!quotaGuard.allowed()) {
+            res.status = 403;
+            res.set_content("{\"error\":\"quota_exceeded\"}", "application/json");
+            return;
+        }
+
         // V1.1.7 : relativePath fourni par le client (webkitdirectory).
         // Vide si le client envoie un fichier isolé. Permet de reconstruire
         // l'arborescence d'un dossier uploadé sans zip.
@@ -393,6 +445,7 @@ void registerUpload(WebService& svc) {
         bus.post(core::TransferProgressEvent{
             state->sessionId, state->bytesWritten, 0.0,
             std::chrono::seconds(0)});
+        quotaGuard.commit(state->bytesWritten);
         bus.post(core::TransferDoneEvent{state->sessionId});
 
         core::log_info("[upload] stream done '" + state->displayName

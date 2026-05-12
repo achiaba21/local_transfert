@@ -13,7 +13,10 @@
 #include "ltr/domain/device.hpp"
 #include "ltr/domain/file_meta.hpp"
 
-namespace ltr::infra { class KnownPeers; }
+namespace ltr::infra {
+class KnownPeers;
+class TransferQuota;
+}
 
 namespace ltr::network {
 
@@ -46,6 +49,8 @@ public:
 
     void cancel(const std::string& sessionId);
 
+    void setQuota(infra::TransferQuota* quota) noexcept { quota_ = quota; }
+
 private:
     struct WorkerCtx {
         std::thread thread;
@@ -61,6 +66,7 @@ private:
     core::EventBus& bus_;
     domain::Device self_;
     infra::KnownPeers* knownPeers_{nullptr};  // V1.6.4 — TOFU TCP
+    infra::TransferQuota* quota_{nullptr};
 
     std::mutex mu_;
     std::unordered_map<std::string, std::shared_ptr<WorkerCtx>> workers_;

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<meta name="robots" content="noindex,nofollow">
+<title>Envoi de fichiers</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body class="page-deposit">
+
+<main class="deposit-main">
+
+  <header class="deposit-header">
+    <p class="deposit-overline">Envoi pour</p>
+    <h1 class="deposit-title" id="deposit-label">…</h1>
+    <p class="deposit-sub">Destinataire : <strong id="deposit-host">…</strong></p>
+  </header>
+
+  <section class="deposit-card" aria-labelledby="deposit-infos-title">
+    <h2 class="deposit-card-title" id="deposit-infos-title">Vos infos</h2>
+    <label class="deposit-field">
+      <span class="deposit-field-label">Nom <span aria-hidden="true">*</span></span>
+      <input type="text" id="deposit-name" autocomplete="name"
+             maxlength="80" required>
+    </label>
+    <label class="deposit-consent">
+      <input type="checkbox" id="deposit-consent">
+      <span id="deposit-consent-text">J'accepte que mes fichiers soient transmis.</span>
+    </label>
+  </section>
+
+  <section class="deposit-card deposit-files-card" aria-labelledby="deposit-files-title"
+           id="deposit-files-section" data-locked="true">
+    <h2 class="deposit-card-title" id="deposit-files-title">Vos fichiers</h2>
+
+    <div class="deposit-lock" id="deposit-lock">
+      <span class="deposit-lock-icon" aria-hidden="true">🔒</span>
+      <span class="deposit-lock-text">Remplissez vos infos pour ajouter des fichiers</span>
+    </div>
+
+    <div class="deposit-drop" id="deposit-drop" hidden>
+      <span class="deposit-drop-icon" aria-hidden="true">⬆︎</span>
+      <p class="deposit-drop-text">Glissez vos fichiers ici<br>ou
+        <button type="button" class="deposit-link-btn" id="deposit-browse-btn">parcourez</button>
+      </p>
+      <p class="deposit-limits" id="deposit-limits">…</p>
+      <input type="file" id="deposit-file-input" multiple hidden>
+    </div>
+
+    <ul class="deposit-file-list" id="deposit-file-list" aria-live="polite"></ul>
+
+    <p class="deposit-total" id="deposit-total" hidden>—</p>
+
+    <button type="button" class="deposit-submit" id="deposit-submit" disabled>
+      Envoyer
+    </button>
+
+    <div class="deposit-progress" id="deposit-progress" hidden>
+      <div class="deposit-progress-bar"><span id="deposit-progress-fill"></span></div>
+      <p class="deposit-progress-text" id="deposit-progress-text">Envoi en cours…</p>
+    </div>
+
+    <div class="deposit-error" id="deposit-error" role="alert" hidden></div>
+  </section>
+
+</main>
+
+<footer class="deposit-footer">
+  Sécurisé. Pas de cloud, pas de compte.
+</footer>
+
+<script src="/deposit.js"></script>
+</body>
+</html>

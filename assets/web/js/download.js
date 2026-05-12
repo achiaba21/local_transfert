@@ -7,12 +7,129 @@
   const $ = (s) => document.querySelector(s);
 
   let sse = null;
+  const INBOX_STORE = 'ltr-web-inbox';
   // V1.2 — Sprint Web P2P : registre des handlers SSE supplémentaires
   // (peers.js, p2p.js). On les attache à l'ouverture de la connexion.
   const pendingListeners = [];
 
   function init() {
+    setupInbox();
+    renderInbox();
     openSse();
+  }
+
+  async function addInboxBlob(meta, blob) {
+    if (!window.LTR.idb || !blob) return null;
+    const id = 'inbox-' + Date.now().toString(36)
+      + '-' + Math.random().toString(36).slice(2, 8);
+    const entry = Object.assign({
+      id,
+      name: 'download',
+      size: blob.size || 0,
+      kind: 'file',
+      from: 'Hôte',
+      receivedAt: Date.now(),
+    }, meta || {}, { blob });
+    await window.LTR.idb.set(INBOX_STORE, id, entry);
+    await renderInbox();
+    return id;
+  }
+
+  function setupInbox() {
+    const clear = $('#inbox-clear');
+    if (clear) {
+      clear.addEventListener('click', async () => {
+        if (!window.LTR.idb) return;
+        if (!confirm('Supprimer les fichiers reçus conservés dans ce navigateur ?')) {
+          return;
+        }
+        const all = await window.LTR.idb.all(INBOX_STORE).catch(() => []);
+        for (const item of all) {
+          await window.LTR.idb.delete(INBOX_STORE, item.key).catch(() => {});
+        }
+        await renderInbox();
+      });
+    }
+  }
+
+  async function storageText() {
+    if (!navigator.storage || !navigator.storage.estimate) return 'Stockage : —';
+    try {
+      const est = await navigator.storage.estimate();
+      const used = est.usage || 0;
+      const quota = est.quota || 0;
+      if (!quota) return 'Stockage : ' + formatBytes(used);
+      return 'Stockage : ' + formatBytes(used) + ' / ' + formatBytes(quota);
+    } catch (e) {
+      return 'Stockage : —';
+    }
+  }
+
+  async function renderInbox() {
+    const list = $('#download-list');
+    if (!list) return;
+    const storage = $('#inbox-storage');
+    if (storage) storage.textContent = await storageText();
+    const pending = Array.from(list.querySelectorAll('[data-live-offer="1"]'));
+    list.innerHTML = '';
+    pending.forEach((n) => list.appendChild(n));
+    const all = window.LTR.idb
+      ? await window.LTR.idb.all(INBOX_STORE).catch(() => [])
+      : [];
+    const entries = all.map((x) => x.value)
+      .filter(Boolean)
+      .sort((a, b) => (b.receivedAt || 0) - (a.receivedAt || 0));
+    for (const e of entries) list.appendChild(renderInboxRow(e));
+    if (list.children.length === 0) {
+      const empty = document.createElement('li');
+      empty.className = 'empty-state';
+      empty.textContent = 'Aucun fichier reçu pour le moment.';
+      list.appendChild(empty);
+    }
+    $('#recv-count').textContent = String(entries.length);
+  }
+
+  function renderInboxRow(entry) {
+    const li = document.createElement('li');
+    li.className = 'file-row file-row-dl inbox-row';
+    const date = entry.receivedAt ? new Date(entry.receivedAt) : null;
+    const when = date ? date.toLocaleString() : '';
+    li.innerHTML = `
+      <div class="dl-head">
+        <span class="f-icon">${entry.kind === 'folder' ? '📦' : iconFor(entry.name)}</span>
+        <span class="f-name">${escapeHtml(entry.name || 'download')}</span>
+        <span class="f-size">${formatBytes(entry.size || 0)}</span>
+      </div>
+      <div class="inbox-row-meta">
+        <span>${escapeHtml(entry.from || 'Hôte')}</span>
+        <span>·</span>
+        <span>${escapeHtml(when)}</span>
+        ${entry.fileCount ? `<span>· ${entry.fileCount} fichier${entry.fileCount > 1 ? 's' : ''}</span>` : ''}
+      </div>
+      <div class="inbox-actions">
+        <button type="button" class="btn btn-primary btn-dl">Télécharger</button>
+        <button type="button" class="btn-ghost inbox-delete">Supprimer</button>
+      </div>`;
+    li.querySelector('.btn-dl').addEventListener('click', () => {
+      if (!entry.blob) return;
+      triggerBlobDownload(entry.blob, entry.name || 'download');
+    });
+    li.querySelector('.inbox-delete').addEventListener('click', async () => {
+      if (window.LTR.idb) await window.LTR.idb.delete(INBOX_STORE, entry.id);
+      await renderInbox();
+    });
+    return li;
+  }
+
+  function triggerBlobDownload(blob, filename) {
+    const a = document.createElement('a');
+    const objectUrl = URL.createObjectURL(blob);
+    a.href = objectUrl;
+    a.download = filename || 'download';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
   }
 
   function openSse() {
@@ -63,6 +180,7 @@
       const totalBytes = files.reduce((s, f) => s + (f.size || 0), 0);
       const wrapper = document.createElement('li');
       wrapper.className = 'dl-bundle';
+      wrapper.dataset.liveOffer = '1';
       wrapper.innerHTML = `
         <button type="button" class="btn btn-primary dl-bundle-btn">
           Télécharger tout (${files.length} · ${formatBytes(totalBytes)})
@@ -75,6 +193,7 @@
     files.forEach((f) => {
       const li = document.createElement('li');
       li.className = 'file-row file-row-dl';
+      li.dataset.liveOffer = '1';
       const url = '/api/download/' + encodeURIComponent(f.ticketId);
       const btnId = 'dl-' + f.ticketId;
       li.innerHTML = `
@@ -143,19 +262,19 @@
         return;
       }
       const blob = xhr.response;
-      const a = document.createElement('a');
-      const objectUrl = URL.createObjectURL(blob);
-      a.href = objectUrl;
-      a.download = filename || 'download';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
+      addInboxBlob({
+        name: filename || 'download',
+        size: expectedSize || blob.size || 0,
+        kind: filename && filename.endsWith('.zip') ? 'folder' : 'file',
+        from: 'Hôte',
+      }, blob).catch((e) =>
+        clientLog('warn', '[inbox] add failed: ' + (e && e.message)));
+      triggerBlobDownload(blob, filename || 'download');
 
       barSpan.style.width = '100%';
       pctEl.textContent = '✓ terminé';
       btn.textContent = '✓ Téléchargé';
-      setTimeout(() => rowEl.remove(), 3500);
+      setTimeout(() => { rowEl.remove(); renderInbox(); }, 3500);
     };
 
     xhr.onerror = () => {
@@ -183,16 +302,18 @@
         if (res.status === 401) { goToLogin(); return; }
         if (!res.ok) throw new Error('http ' + res.status);
         const blob = await res.blob();
-        const a = document.createElement('a');
-        const objectUrl = URL.createObjectURL(blob);
-        a.href = objectUrl;
-        a.download = 'LocalTransfer-' + Date.now() + '.zip';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
+        const name = 'LocalTransfer-' + Date.now() + '.zip';
+        await addInboxBlob({
+          name,
+          size: blob.size,
+          kind: 'folder',
+          from: 'Hôte',
+          fileCount: files.length,
+        }, blob).catch((e) =>
+          clientLog('warn', '[inbox] bundle add failed: ' + (e && e.message)));
+        triggerBlobDownload(blob, name);
         btn.textContent = '✓ Téléchargé';
-        setTimeout(() => wrapperEl.remove(), 3000);
+        setTimeout(() => { wrapperEl.remove(); renderInbox(); }, 3000);
       } catch (e) {
         clientLog('error', '[dl] bundle: ' + e);
         btn.textContent = '✗ Échec bundle — utilisez les boutons individuels';
@@ -231,4 +352,5 @@
   window.LTR = window.LTR || {};
   window.LTR.initDownload  = init;
   window.LTR.addSseListener = addSseListener;
+  window.LTR.webInbox = { addBlob: addInboxBlob, render: renderInbox };
 })();

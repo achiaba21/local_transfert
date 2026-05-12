@@ -86,6 +86,18 @@ struct FingerprintChangedEvent {
     std::string newFingerprint;
 };
 
+// Phase 2 — Portail Client Externe. Émis par DepositSessionService::finalize()
+// pour notifier l'UI desktop d'un nouveau dépôt reçu via le portail public.
+struct DepositReceivedEvent {
+    std::string   depositSessionId;
+    std::string   depositLinkId;
+    std::string   depositLinkLabel;
+    std::string   depositorName;
+    int           fileCount{0};
+    std::uint64_t totalBytes{0};
+    std::int64_t  timestamp{0};
+};
+
 using Event = std::variant<
     PeerSeenEvent, PeerLostEvent,
     IncomingOfferEvent, OfferAnsweredEvent,
@@ -95,7 +107,8 @@ using Event = std::variant<
     WebUploadStartedEvent,
     WebIncomingOfferEvent,
     WebOfferTimedOutEvent,
-    FingerprintChangedEvent>;
+    FingerprintChangedEvent,
+    DepositReceivedEvent>;
 
 // File d'événements thread-safe consommée par le thread UI à chaque frame.
 class EventBus {

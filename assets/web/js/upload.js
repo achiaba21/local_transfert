@@ -682,4 +682,7 @@
 
   window.LTR = window.LTR || {};
   window.LTR.initUpload = init;
+  window.LTR.uploadTest = {
+    groupFolderFiles,
+  };
 })();

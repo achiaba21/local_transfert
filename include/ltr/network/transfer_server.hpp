@@ -19,6 +19,8 @@
 #include "ltr/domain/transfer_request.hpp"
 #include "ltr/domain/transfer_session.hpp"
 
+namespace ltr::infra { class TransferQuota; }
+
 namespace ltr::network {
 
 // Serveur TCP : accepte les connexions entrantes et gère une session par
@@ -43,6 +45,7 @@ public:
     void acceptOffer(const std::string& sessionId);
     void rejectOffer(const std::string& sessionId, const std::string& reason);
     void cancelSession(const std::string& sessionId);
+    void setQuota(infra::TransferQuota* quota) noexcept { quota_ = quota; }
 
 private:
     struct PendingSession {
@@ -64,6 +67,7 @@ private:
     std::uint16_t port_;
     int resumeSidecarTtlHours_{24};  // V1.1.9
     std::string selfFingerprint_;    // V1.6.4 — empreinte stable inclue dans Accept
+    infra::TransferQuota* quota_{nullptr};
 
     std::atomic<bool> running_{false};
     sf::TcpListener listener_;

@@ -4,6 +4,7 @@
 #include "ltr/web/web_session_store.hpp"
 
 #include <cassert>
+#include <filesystem>
 #include <iostream>
 
 int main() {
@@ -20,6 +21,33 @@ int main() {
         auto res = store.authenticate("111111", "472931",
                                       iphoneDeviceId, iphoneUA);
         assert(!res.has_value());
+    }
+
+    // Persistance host par device_id : alias restauré même si le navigateur
+    // ne renvoie plus son localStorage.
+    {
+        const auto p = std::filesystem::temp_directory_path()
+                     / "ltr_web_aliases_test.json";
+        std::filesystem::remove(p);
+        {
+            WebSessionStore s1;
+            s1.setCustomNamesPath(p);
+            auto t = s1.authenticate("472931", "472931",
+                                     iphoneDeviceId, iphoneUA, "Bureau");
+            assert(t.has_value());
+        }
+        {
+            WebSessionStore s2;
+            s2.setCustomNamesPath(p);
+            auto t = s2.authenticate("472931", "472931",
+                                     iphoneDeviceId, iphoneUA);
+            assert(t.has_value());
+            auto s = s2.validate(*t);
+            assert(s.has_value());
+            assert(s->customName == "Bureau");
+            assert(s->displayName.find("(Bureau)") != std::string::npos);
+        }
+        std::filesystem::remove(p);
     }
 
     // device_id vide → nullopt

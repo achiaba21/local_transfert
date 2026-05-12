@@ -12,9 +12,19 @@
 
 #include "ltr/app/app_state.hpp"
 #include "ltr/core/event_bus.hpp"
+#include "ltr/infra/business_policy.hpp"
 #include "ltr/infra/config.hpp"
+#include "ltr/infra/deposit_history.hpp"
+#include "ltr/infra/deposit_link.hpp"
+#include "ltr/infra/deposit_link_repository.hpp"
+#include "ltr/infra/deposit_link_service.hpp"
+#include "ltr/infra/deposit_receipt.hpp"
+#include "ltr/infra/deposit_session_repository.hpp"
+#include "ltr/infra/deposit_session_service.hpp"
+#include "ltr/infra/deposit_token_generator.hpp"
 #include "ltr/infra/known_peers.hpp"
 #include "ltr/infra/peers_history.hpp"      // V1.6.5 — Wave 4 item J
+#include "ltr/infra/quota_service.hpp"
 #include "ltr/infra/transfer_history.hpp"   // V1.6.5 — Wave 4 item K
 #include "ltr/network/discovery_service.hpp"
 #include "ltr/network/transfer_client.hpp"
@@ -142,6 +152,19 @@ private:
     // V1.6.5 — Sprint Stabilité (Wave 4 items J + K).
     std::unique_ptr<infra::PeersHistory>       peersHistory_;
     std::unique_ptr<infra::TransferHistory>    transferHistory_;
+    std::unique_ptr<infra::JsonPolicyRepository> policyRepository_;
+    std::unique_ptr<infra::PolicyService>        policyService_;
+    std::unique_ptr<infra::JsonQuotaRepository>  quotaRepository_;
+    std::unique_ptr<infra::QuotaService>         quotaService_;
+    // Phase 2 — Portail Client Externe.
+    std::unique_ptr<infra::SecureRandomTokenGenerator>   depositTokenGen_;
+    std::unique_ptr<infra::JsonDepositLinkRepository>    depositLinkRepo_;
+    std::unique_ptr<infra::DepositLinkService>           depositLinkService_;
+    std::unique_ptr<infra::JsonDepositSessionRepository> depositSessionRepo_;
+    std::unique_ptr<infra::JsonDepositHistoryRepository> depositHistoryRepo_;
+    std::unique_ptr<infra::DepositHistoryStore>          depositHistory_;
+    std::unique_ptr<infra::DepositReceiptService>        depositReceipts_;
+    std::unique_ptr<infra::DepositSessionService>        depositSessionService_;
     // Cache totalBytes par sessionId pour calculer le delta sur Done/Failed.
     std::unordered_map<std::string, std::uint64_t> sessionBytes_;
 
@@ -149,6 +172,13 @@ public:
     // V1.6.5 — accès lecture seule pour HistoryScreen + sidebar.
     infra::PeersHistory*    peersHistory()    { return peersHistory_.get(); }
     infra::TransferHistory* transferHistory() { return transferHistory_.get(); }
+
+    // Phase 2 — API publique pour l'écran DepositLinksScreen.
+    infra::DepositResult<infra::DepositLink>
+    createDepositLink(const infra::DepositLinkSpec& spec);
+    bool revokeDepositLink(const std::string& id);
+    std::vector<infra::DepositLink> listDepositLinks();
+    std::vector<infra::DepositHistory::Entry> depositHistorySnapshot();
 private:
 
     std::string currentPinCode_; // PIN actif pour l'offre sortante

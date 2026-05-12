@@ -798,6 +798,27 @@ body.page-main {
   list-style: none; padding: 0; margin: var(--sp-md) 0 0;
   display: flex; flex-direction: column; gap: var(--sp-sm);
 }
+.inbox-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-md);
+  min-height: 36px;
+  color: var(--text-secondary);
+  font-size: var(--fs-small);
+}
+.inbox-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-xs);
+  color: var(--text-secondary);
+  font-size: var(--fs-small);
+}
+.inbox-actions {
+  display: flex;
+  gap: var(--sp-sm);
+  flex-wrap: wrap;
+}
 .file-row, .upload-row {
   display: flex;
   align-items: center;
@@ -947,6 +968,41 @@ body.page-main {
 }
 .self-peer-edit {
   flex: 0 0 auto;
+}
+.self-peer-form {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  flex: 1 1 280px;
+  min-width: 220px;
+}
+.self-peer-form[hidden] { display: none; }
+.self-peer-form input {
+  min-width: 0;
+  flex: 1;
+  min-height: 36px;
+  padding: 0 var(--sp-sm);
+  border: 1px solid var(--separator);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+}
+.self-peer-form input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.14);
+}
+@media (max-width: 719px) {
+  .self-peer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .self-peer-form {
+    flex-basis: auto;
+    min-width: 0;
+  }
 }
 .peers-list {
   list-style: none;
@@ -1206,6 +1262,34 @@ body.page-main {
   font-size: var(--fs-small);
   box-shadow: var(--shadow);
 }
+.p2p-diagnostic {
+  position: fixed;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom) + 16px);
+  transform: translateX(-50%);
+  z-index: 70;
+  width: min(520px, calc(100vw - 32px));
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-md);
+  padding: var(--sp-md);
+  background: #FFFBEB;
+  color: #7C2D12;
+  border: 1px solid var(--warning);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow);
+}
+.p2p-diagnostic[hidden] { display: none; }
+.p2p-diagnostic strong {
+  display: block;
+  margin-bottom: var(--sp-xs);
+  color: #7C2D12;
+}
+.p2p-diagnostic p {
+  margin: 0;
+  color: #92400E;
+  font-size: var(--fs-small);
+}
 .p2p-toast[hidden] { display: none; }
 .p2p-toast[data-kind="warning"] { background: var(--warning); }
 .p2p-toast[data-kind="error"]   { background: var(--error); }
@@ -1449,4 +1533,334 @@ body.page-main {
 .peer-card:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* ============================================================
+   Phase 2 — Portail Client Externe (page déposant ÉTANCHE)
+   ============================================================ */
+body.page-deposit {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--bg);
+  padding: 0;
+}
+.deposit-main {
+  flex: 1;
+  width: 100%;
+  max-width: 520px;
+  margin: 0 auto;
+  padding: var(--sp-xl) var(--sp-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-lg);
+}
+.deposit-header {
+  background: var(--accent-light);
+  border-radius: var(--r-lg);
+  padding: var(--sp-lg);
+  text-align: left;
+}
+.deposit-overline {
+  margin: 0;
+  font-size: var(--fs-overline);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.deposit-title {
+  margin: var(--sp-xs) 0 var(--sp-sm);
+  font-size: var(--fs-h1);
+  font-weight: 700;
+  color: var(--text);
+}
+.deposit-sub {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--fs-small);
+}
+.deposit-card {
+  background: var(--surface);
+  border: 1px solid var(--separator);
+  border-radius: var(--r-md);
+  padding: var(--sp-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-md);
+}
+.deposit-card-title {
+  margin: 0 0 var(--sp-xs);
+  font-size: var(--fs-overline);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.deposit-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+}
+.deposit-field-label {
+  font-size: var(--fs-small);
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.deposit-field input {
+  height: 44px;
+  padding: 0 var(--sp-md);
+  background: var(--surface);
+  border: 1px solid var(--separator);
+  border-radius: var(--r-sm);
+  font-size: 16px;
+  color: var(--text);
+}
+.deposit-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.deposit-consent {
+  display: flex;
+  gap: var(--sp-sm);
+  align-items: flex-start;
+  font-size: var(--fs-body);
+  color: var(--text);
+  cursor: pointer;
+}
+.deposit-consent input { margin-top: 3px; }
+.deposit-files-card[data-locked="true"] .deposit-drop,
+.deposit-files-card[data-locked="true"] .deposit-submit {
+  opacity: 0.4;
+  pointer-events: none;
+}
+.deposit-lock {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding: var(--sp-md);
+  background: var(--bg);
+  border: 1px dashed var(--separator);
+  border-radius: var(--r-sm);
+  color: var(--text-secondary);
+  font-size: var(--fs-small);
+}
+.deposit-lock-icon { font-size: 18px; }
+.deposit-drop {
+  border: 2px dashed var(--separator);
+  border-radius: var(--r-md);
+  padding: var(--sp-xl);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 120ms, background 120ms;
+}
+.deposit-drop:hover, .deposit-drop-over {
+  border-color: var(--accent);
+  background: var(--accent-light);
+}
+.deposit-drop-icon {
+  font-size: 36px;
+  display: block;
+  margin-bottom: var(--sp-sm);
+  color: var(--accent);
+}
+.deposit-drop-text { margin: 0; color: var(--text); }
+.deposit-link-btn {
+  background: none; border: none; color: var(--accent);
+  text-decoration: underline; cursor: pointer; padding: 0;
+  font: inherit;
+}
+.deposit-limits {
+  margin: var(--sp-xs) 0 0;
+  font-size: var(--fs-small);
+  color: var(--text-secondary);
+}
+.deposit-file-list {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: var(--sp-xs);
+}
+.deposit-file-row {
+  display: flex; align-items: center; gap: var(--sp-sm);
+  padding: var(--sp-sm) var(--sp-md);
+  background: var(--bg);
+  border-radius: var(--r-sm);
+}
+.deposit-file-name {
+  flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.deposit-file-size { color: var(--text-secondary); font-size: var(--fs-small); }
+.deposit-file-remove {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: transparent; color: var(--text-secondary);
+  border: none; cursor: pointer; font-size: 18px;
+}
+.deposit-file-remove:hover { background: var(--separator); color: var(--error); }
+.deposit-total {
+  margin: 0;
+  text-align: right;
+  font-size: var(--fs-small);
+  color: var(--text-secondary);
+}
+.deposit-submit {
+  height: 48px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--r-md);
+  font-size: var(--fs-button);
+  font-weight: 600;
+  cursor: pointer;
+}
+.deposit-submit:hover:not(:disabled) { background: var(--accent-hover); }
+.deposit-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+.deposit-progress { display: flex; flex-direction: column; gap: var(--sp-xs); }
+.deposit-progress-bar {
+  height: 6px;
+  background: var(--separator);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+.deposit-progress-bar > span {
+  display: block; height: 100%; width: 0%;
+  background: var(--accent);
+  transition: width 200ms ease-out;
+}
+.deposit-progress-text { margin: 0; font-size: var(--fs-small); color: var(--text-secondary); }
+.deposit-error {
+  background: #FEF2F2;
+  color: var(--error);
+  border-radius: var(--r-sm);
+  padding: var(--sp-sm) var(--sp-md);
+  font-size: var(--fs-small);
+}
+.deposit-footer {
+  text-align: center;
+  padding: var(--sp-xl) var(--sp-lg);
+  color: var(--text-secondary);
+  font-size: var(--fs-small);
+}
+.deposit-expired {
+  flex: 1;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center;
+  padding: var(--sp-xxl) var(--sp-lg);
+  gap: var(--sp-md);
+}
+.deposit-expired-icon { font-size: 64px; color: var(--text-secondary); }
+.deposit-expired h1 { margin: 0; font-size: var(--fs-h1); color: var(--text); }
+.deposit-expired p { margin: 0; color: var(--text-secondary); max-width: 380px; }
+
+.deposit-confirm {
+  max-width: 480px; margin: 0 auto;
+  padding: var(--sp-xxl) var(--sp-lg);
+  text-align: center;
+  display: flex; flex-direction: column; gap: var(--sp-md);
+}
+.deposit-confirm-check { font-size: 64px; color: var(--success); }
+.deposit-confirm h1 { margin: 0; font-size: var(--fs-h1); color: var(--text); }
+.deposit-confirm-id, .deposit-confirm-meta {
+  margin: 0; color: var(--text-secondary); font-size: var(--fs-small);
+}
+.deposit-confirm-id code { color: var(--text); font-weight: 600; }
+.deposit-confirm-btn {
+  display: inline-block; text-decoration: none;
+  background: var(--accent); color: #fff;
+  padding: var(--sp-md) var(--sp-lg);
+  border-radius: var(--r-md);
+  font-weight: 600;
+  align-self: center;
+}
+.deposit-confirm-btn:hover { background: var(--accent-hover); }
+.deposit-confirm-thanks { margin: var(--sp-md) 0 0; color: var(--text); }
+
+.deposit-receipt-page {
+  max-width: 720px; margin: var(--sp-xl) auto;
+  padding: var(--sp-xl);
+  background: var(--surface);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow);
+}
+.deposit-receipt-check { font-size: 32px; color: var(--success); }
+.deposit-receipt-files { list-style: disc; padding-left: var(--sp-lg); }
+.deposit-receipt-sig code { font-size: var(--fs-small); }
+.deposit-receipt-actions { text-align: center; margin-top: var(--sp-xl); }
+.deposit-receipt-actions button {
+  background: var(--accent); color: #fff;
+  border: none; padding: var(--sp-sm) var(--sp-lg);
+  border-radius: var(--r-md); cursor: pointer;
+  font-weight: 600;
+}
+
+/* ============================================================
+   Phase 2 — Onglet dashboard host : gestion des liens de dépôt
+   ============================================================ */
+.host-deposit-section { padding: var(--sp-lg); }
+.host-deposit-section h2 { margin: 0 0 var(--sp-md); font-size: var(--fs-h2); }
+.host-deposit-empty {
+  padding: var(--sp-xl);
+  text-align: center;
+  color: var(--text-secondary);
+  border: 1px dashed var(--separator);
+  border-radius: var(--r-md);
+}
+.host-deposit-list {
+  display: flex; flex-direction: column; gap: var(--sp-md);
+  margin-bottom: var(--sp-xl);
+}
+.host-deposit-card {
+  background: var(--surface);
+  border: 1px solid var(--separator);
+  border-radius: var(--r-md);
+  padding: var(--sp-md) var(--sp-lg);
+  box-shadow: var(--shadow);
+}
+.host-deposit-card-inactive { opacity: 0.55; }
+.host-deposit-card header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: var(--sp-sm);
+}
+.host-deposit-card h3 { margin: 0; font-size: var(--fs-h2); }
+.host-deposit-status {
+  font-size: var(--fs-small);
+  padding: 2px 10px;
+  border-radius: var(--r-pill);
+  background: var(--accent-light);
+  color: var(--accent);
+}
+.host-deposit-url code {
+  background: var(--bg); padding: 2px 6px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-small);
+  word-break: break-all;
+}
+.host-deposit-meta { color: var(--text-secondary); font-size: var(--fs-small); }
+.host-deposit-actions { display: flex; gap: var(--sp-sm); margin-top: var(--sp-sm); }
+.host-deposit-form {
+  background: var(--surface);
+  border: 1px solid var(--separator);
+  border-radius: var(--r-md);
+  padding: var(--sp-lg);
+  display: flex; flex-direction: column; gap: var(--sp-md);
+}
+.host-deposit-form label {
+  display: flex; flex-direction: column; gap: var(--sp-xs);
+  font-size: var(--fs-small); color: var(--text-secondary);
+}
+.host-deposit-form input,
+.host-deposit-form select,
+.host-deposit-form textarea {
+  font-size: var(--fs-body);
+  color: var(--text);
+  padding: var(--sp-sm) var(--sp-md);
+  border: 1px solid var(--separator);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+}
+.btn-danger {
+  background: var(--error); color: #fff;
+  border: none; border-radius: var(--r-sm);
+  padding: var(--sp-xs) var(--sp-md);
+  cursor: pointer;
 }

@@ -28,6 +28,10 @@ public:
     void Post(const std::string& path, Handler h) {
         for (auto* s : backends_) s->Post(path, h);
     }
+    template <typename Handler>
+    void Delete(const std::string& path, Handler h) {
+        for (auto* s : backends_) s->Delete(path, h);
+    }
 
 private:
     std::vector<httplib::Server*> backends_;

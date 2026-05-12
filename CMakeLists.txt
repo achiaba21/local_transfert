@@ -85,6 +85,17 @@ ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/login.js
                LoginJs "application/javascript; charset=utf-8" login_js)
 ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/css/style.css
                StyleCss "text/css; charset=utf-8" style_css)
+# Phase 2 — Portail Client Externe.
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/html/deposit.html
+               DepositHtml "text/html; charset=utf-8" deposit_html)
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/html/deposit_expired.html
+               DepositExpiredHtml "text/html; charset=utf-8" deposit_expired_html)
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/html/deposit_receipt.html
+               DepositReceiptHtml "text/html; charset=utf-8" deposit_receipt_html)
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/deposit.js
+               DepositJs "application/javascript; charset=utf-8" deposit_js)
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/host_deposit_links.js
+               HostDepositLinksJs "application/javascript; charset=utf-8" host_deposit_links_js)
 
 # V1.6.6+ — Polices Geist copiées dans le dossier de build (cohérence
 # Mac+Win, sans embed binaire qui faisait exploser le compile time —
@@ -138,6 +149,11 @@ set(LTR_WEB_GEN_HEADERS
     ${pin_storage_js_GEN}
     ${login_js_GEN}
     ${style_css_GEN}
+    ${deposit_html_GEN}
+    ${deposit_expired_html_GEN}
+    ${deposit_receipt_html_GEN}
+    ${deposit_js_GEN}
+    ${host_deposit_links_js_GEN}
     ${icon_upload_GEN}
     ${icon_download_GEN}
     ${icon_file_GEN}
@@ -178,6 +194,19 @@ add_library(ltr_core STATIC
     src/infra/filesystem_service.cpp
     src/infra/hash_service.cpp
     src/infra/resume_sidecar.cpp
+    src/infra/business_policy.cpp
+    src/infra/quota_service.cpp
+    src/infra/audit_export_service.cpp
+    # Phase 2 — Portail Client Externe.
+    src/infra/deposit_link.cpp
+    src/infra/deposit_link_repository.cpp
+    src/infra/deposit_link_service.cpp
+    src/infra/deposit_session.cpp
+    src/infra/deposit_session_repository.cpp
+    src/infra/deposit_session_service.cpp
+    src/infra/deposit_history.cpp
+    src/infra/deposit_receipt.cpp
+    src/infra/deposit_token_generator.cpp
     src/infra/known_peers.cpp        # V1.6.4 — Wave 2 TOFU TCP
     src/infra/crypto_identity.cpp    # V1.6.4 — Wave 2 TOFU TCP
     src/infra/peers_history.cpp      # V1.6.5 — Wave 4 item J
@@ -204,6 +233,9 @@ add_library(ltr_core STATIC
     src/web/routes/upload_routes.cpp
     src/web/routes/download_routes.cpp
     src/web/routes/events_routes.cpp
+    src/web/routes/history_routes.cpp
+    src/web/routes/deposit_routes.cpp        # Phase 2
+    src/web/routes/deposit_admin_routes.cpp  # Phase 2
     src/web/routes/p2p_routes.cpp
     src/web/routes/self_routes.cpp
     src/web/routes/share_routes.cpp
@@ -276,8 +308,10 @@ add_library(ltr_ui STATIC
     src/ui/widgets/qr_code_view.cpp
     src/ui/widgets/scroll_area.cpp
     src/ui/widgets/share_panel.cpp
+    src/ui/widgets/deposit_link_card.cpp        # Phase 2
     src/ui/screens/main_screen.cpp
     src/ui/screens/incoming_offer_screen.cpp
+    src/ui/screens/deposit_links_screen.cpp     # Phase 2
     ${LTR_DRAG_DROP_SRC}
     ${LTR_CLIPBOARD_SRC}
 )

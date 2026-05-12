@@ -5,6 +5,7 @@
 #include "ltr/domain/transfer_session.hpp"
 #include "ltr/infra/filesystem_service.hpp"
 #include "ltr/infra/known_peers.hpp"   // V1.6.4 — TOFU TCP
+#include "ltr/infra/quota_service.hpp"
 #include "ltr/network/protocol.hpp"
 
 #include <algorithm>
@@ -33,6 +34,38 @@ std::string generateSessionId() {
                   static_cast<unsigned long long>(b));
     return std::string(buf);
 }
+
+class QuotaReservationGuard {
+public:
+    QuotaReservationGuard(infra::TransferQuota* quota,
+                          std::string id,
+                          infra::TransferFlow flow,
+                          std::uint64_t expectedBytes)
+        : quota_(quota), id_(std::move(id)) {
+        if (!quota_) return;
+        decision_ = quota_->tryReserve(id_, flow, expectedBytes);
+        active_ = decision_.allowed;
+    }
+
+    ~QuotaReservationGuard() {
+        if (quota_ && active_) quota_->release(id_);
+    }
+
+    bool allowed() const noexcept { return decision_.allowed; }
+    const infra::QuotaDecision& decision() const noexcept { return decision_; }
+
+    void commit(std::uint64_t actualBytes) {
+        if (!quota_ || !active_) return;
+        quota_->commit(id_, actualBytes);
+        active_ = false;
+    }
+
+private:
+    infra::TransferQuota* quota_{nullptr};
+    std::string id_;
+    bool active_{false};
+    infra::QuotaDecision decision_;
+};
 
 } // namespace
 
@@ -179,6 +212,20 @@ void TransferClient::runSender(
 
     std::uint64_t total = 0;
     for (const auto& e : entries) total += e.meta.size;
+
+    QuotaReservationGuard quotaGuard(
+        quota_, sessionId, infra::TransferFlow::TcpOut, total);
+    if (!quotaGuard.allowed()) {
+        core::log_warn("[sender] quota exceeded for session "
+                       + sessionId.substr(0, 8));
+        bus_.post(core::TransferFailedEvent{
+            sessionId, quotaGuard.decision().reason.empty()
+                ? std::string("quota_exceeded")
+                : quotaGuard.decision().reason,
+            core::ErrorCategory::Permanent});
+        cleanup();
+        return;
+    }
 
     // Ouvrir la connexion TCP.
     core::log_info("[sender] connect TCP...");
@@ -384,6 +431,7 @@ void TransferClient::runSender(
     bus_.post(core::TransferProgressEvent{
         sessionId, session.bytesTransferred(),
         session.speedBytesPerSec(), std::chrono::seconds(0)});
+    quotaGuard.commit(session.bytesTransferred());
     bus_.post(core::TransferDoneEvent{sessionId});
     cleanup();
 }

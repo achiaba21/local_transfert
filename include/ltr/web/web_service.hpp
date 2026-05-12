@@ -18,6 +18,15 @@
 #include "ltr/web/sse_broadcaster.hpp"
 #include "ltr/web/web_upload_announce.hpp"
 
+namespace ltr::infra {
+class TransferHistory;
+class TransferQuota;
+class DepositLinkService;
+class DepositSessionService;
+class DepositReceiptService;
+class DepositHistoryStore;
+}
+
 namespace ltr::web {
 
 // Façade publique de la couche web. Possède :
@@ -47,6 +56,25 @@ public:
     // cert auto-signé. À appeler AVANT start() pour activer HTTPS.
     void setCertConfigDir(std::filesystem::path cfgDir) {
         certCfgDir_ = std::move(cfgDir);
+        sessions_.setCustomNamesPath(certCfgDir_ / "web_aliases.json");
+    }
+    void setTransferHistory(infra::TransferHistory* history) {
+        transferHistory_ = history;
+    }
+    void setQuota(infra::TransferQuota* quota) noexcept { quota_ = quota; }
+
+    // Phase 2 — Portail client externe.
+    void setDepositLinkService(infra::DepositLinkService* svc) noexcept {
+        depositLinks_ = svc;
+    }
+    void setDepositSessionService(infra::DepositSessionService* svc) noexcept {
+        depositSessions_ = svc;
+    }
+    void setDepositReceiptService(infra::DepositReceiptService* svc) noexcept {
+        depositReceipts_ = svc;
+    }
+    void setDepositHistory(infra::DepositHistoryStore* store) noexcept {
+        depositHistory_ = store;
     }
 
     // Envoi host → browser. Crée N tickets et émet un SSE 'files-offer'
@@ -101,6 +129,12 @@ public:
     DownloadTicketStore&     tickets()     { return tickets_; }
     SseBroadcaster&          broadcaster() { return broadcaster_; }
     WebUploadAnnounceStore&  announces()   { return announces_; } // V1.1.2
+    infra::TransferHistory*  transferHistory() { return transferHistory_; }
+    infra::TransferQuota*    quota() { return quota_; }
+    infra::DepositLinkService*    depositLinks()    { return depositLinks_; }
+    infra::DepositSessionService* depositSessions() { return depositSessions_; }
+    infra::DepositReceiptService* depositReceipts() { return depositReceipts_; }
+    infra::DepositHistoryStore*   depositHistory()  { return depositHistory_; }
     core::EventBus&       bus()         { return bus_; }
     HttpServer&           httpServer()  { return server_; }
     const domain::Device& self()  const { return self_; }
@@ -138,6 +172,12 @@ private:
     DownloadTicketStore     tickets_;
     SseBroadcaster          broadcaster_;
     WebUploadAnnounceStore  announces_;
+    infra::TransferHistory* transferHistory_{nullptr};
+    infra::TransferQuota*   quota_{nullptr};
+    infra::DepositLinkService*    depositLinks_{nullptr};
+    infra::DepositSessionService* depositSessions_{nullptr};
+    infra::DepositReceiptService* depositReceipts_{nullptr};
+    infra::DepositHistoryStore*   depositHistory_{nullptr};
 
     std::string           accessPin_;
     std::atomic<std::uint16_t> port_{0};

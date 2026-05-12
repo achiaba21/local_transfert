@@ -31,6 +31,8 @@ add_test(NAME display_name COMMAND test_display_name)
 add_executable(test_p2p_signal_routes test_p2p_signal_routes.cpp)
 target_link_libraries(test_p2p_signal_routes PRIVATE ltr_core cpphttplib)
 add_test(NAME p2p_signal_routes COMMAND test_p2p_signal_routes)
+set_tests_properties(p2p_signal_routes PROPERTIES
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # V1.4 — Sprint Clipboard Paste : invariants de l'API readClipboard.
 add_executable(test_clipboard_stub test_clipboard_stub.cpp)
@@ -53,6 +55,14 @@ add_test(NAME qr_code COMMAND test_qr_code)
 add_executable(test_http_smoke test_http_smoke.cpp)
 target_link_libraries(test_http_smoke PRIVATE ltr_core cpphttplib)
 add_test(NAME http_smoke COMMAND test_http_smoke)
+set_tests_properties(http_smoke PROPERTIES
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+find_program(NODE_EXECUTABLE node)
+if (NODE_EXECUTABLE)
+  add_test(NAME web_folder_logic
+           COMMAND ${NODE_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_web_folder_logic.js)
+endif()
 
 # V1.1.8 : test du générateur zip streamé (formule Content-Length + zip valide).
 add_executable(test_streaming_zip test_streaming_zip.cpp)
@@ -88,6 +98,41 @@ add_test(NAME peers_history COMMAND test_peers_history)
 add_executable(test_transfer_history test_transfer_history.cpp)
 target_link_libraries(test_transfer_history PRIVATE ltr_core)
 add_test(NAME transfer_history COMMAND test_transfer_history)
+
+add_executable(test_business_policy test_business_policy.cpp)
+target_link_libraries(test_business_policy PRIVATE ltr_core)
+add_test(NAME business_policy COMMAND test_business_policy)
+
+add_executable(test_quota_service test_quota_service.cpp)
+target_link_libraries(test_quota_service PRIVATE ltr_core)
+add_test(NAME quota_service COMMAND test_quota_service)
+
+add_executable(test_audit_export_service test_audit_export_service.cpp)
+target_link_libraries(test_audit_export_service PRIVATE ltr_core)
+add_test(NAME audit_export_service COMMAND test_audit_export_service)
+
+# Phase 2 — Portail Client Externe.
+add_executable(test_deposit_link_service test_deposit_link_service.cpp)
+target_link_libraries(test_deposit_link_service PRIVATE ltr_core)
+add_test(NAME deposit_link_service COMMAND test_deposit_link_service)
+
+add_executable(test_deposit_receipt_service test_deposit_receipt_service.cpp)
+target_link_libraries(test_deposit_receipt_service PRIVATE ltr_core)
+add_test(NAME deposit_receipt_service COMMAND test_deposit_receipt_service)
+
+add_executable(test_deposit_history test_deposit_history.cpp)
+target_link_libraries(test_deposit_history PRIVATE ltr_core)
+add_test(NAME deposit_history COMMAND test_deposit_history)
+
+add_executable(test_deposit_session_service test_deposit_session_service.cpp)
+target_link_libraries(test_deposit_session_service PRIVATE ltr_core)
+add_test(NAME deposit_session_service COMMAND test_deposit_session_service)
+
+add_executable(test_deposit_routes test_deposit_routes.cpp)
+target_link_libraries(test_deposit_routes PRIVATE ltr_core cpphttplib)
+add_test(NAME deposit_routes COMMAND test_deposit_routes)
+set_tests_properties(deposit_routes PROPERTIES
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # V1.1.10 — Sprint UI Layout System : DSL HBox/VBox + breakpoints + cache.
 add_executable(test_layout_box test_layout_box.cpp)

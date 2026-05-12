@@ -11,6 +11,7 @@
 #include "ltr/core/event_bus.hpp"
 #include "ltr/core/logger.hpp"
 #include "ltr/core/types.hpp"
+#include "ltr/infra/quota_service.hpp"
 #include "ltr/web/range_parser.hpp"
 #include "ltr/web/streaming_zip_source.hpp"
 #include "ltr/web/web_service.hpp"
@@ -43,6 +44,37 @@ std::string rfc5987Encode(const std::string& s) {
 constexpr std::chrono::milliseconds kProgressInterval{100};
 constexpr std::uint64_t kProgressByteStep = 1 * 1024 * 1024;
 
+class QuotaReservationGuard {
+public:
+    QuotaReservationGuard(infra::TransferQuota* quota,
+                          std::string id,
+                          infra::TransferFlow flow,
+                          std::uint64_t expectedBytes)
+        : quota_(quota), id_(std::move(id)) {
+        if (!quota_) return;
+        decision_ = quota_->tryReserve(id_, flow, expectedBytes);
+        active_ = decision_.allowed;
+    }
+
+    ~QuotaReservationGuard() {
+        if (quota_ && active_) quota_->release(id_);
+    }
+
+    bool allowed() const noexcept { return decision_.allowed; }
+
+    void commit(std::uint64_t actualBytes) {
+        if (!quota_ || !active_) return;
+        quota_->commit(id_, actualBytes);
+        active_ = false;
+    }
+
+private:
+    infra::TransferQuota* quota_{nullptr};
+    std::string id_;
+    bool active_{false};
+    infra::QuotaDecision decision_;
+};
+
 // V1.1.8-UX2 : acquiert le flag de cancel partagé via WebService.
 // Le provider l'observe à chaque chunk ; le host peut y écrire true
 // depuis le thread UI pour interrompre proprement.
@@ -72,6 +104,15 @@ void streamFile(const DownloadTicket& tkt, WebService& svc,
     const std::uint64_t streamStart = range.valid ? range.start : 0;
     const std::uint64_t streamLen   = range.valid
         ? (range.end - range.start + 1) : sz;
+
+    auto quotaGuard = std::make_shared<QuotaReservationGuard>(
+        svc.quota(), tkt.sessionId + ":http-down:" + std::to_string(streamStart),
+        infra::TransferFlow::HttpDown, streamLen);
+    if (!quotaGuard->allowed()) {
+        res.status = 403;
+        res.set_content("{\"error\":\"quota_exceeded\"}", "application/json");
+        return;
+    }
 
     const auto filename = rfc5987Encode(tkt.displayName);
     res.set_header("Content-Disposition",
@@ -127,7 +168,7 @@ void streamFile(const DownloadTicket& tkt, WebService& svc,
         sz, "application/octet-stream",
         [fileStream, sentTotal, doneEmitted,
          lastProgressTime, lastProgressBytes, cancelFlag,
-         sessionId, sz, startTime, &bus, &svc](
+         quotaGuard, sessionId, sz, streamStart, startTime, &bus, &svc](
             std::size_t /*offset*/, std::size_t length,
             httplib::DataSink& sink) {
             // V1.1.8-UX2 : vérif cancel avant chaque chunk.
@@ -149,6 +190,7 @@ void streamFile(const DownloadTicket& tkt, WebService& svc,
             if (got == 0) {
                 if (!*doneEmitted) {
                     bus.post(core::TransferDoneEvent{sessionId});
+                    quotaGuard->commit(*sentTotal - streamStart);
                     *doneEmitted = true;
                 }
                 svc.releaseCancelFlag(sessionId);  // V1.6.5 item B
@@ -214,6 +256,14 @@ void streamZip(const DownloadTicket& tkt, WebService& svc,
     auto cancelFlag = svc.acquireCancelFlag(sessionId);
     const auto totalSize = tkt.size;
     const auto startTime = std::chrono::steady_clock::now();
+    auto quotaGuard = std::make_shared<QuotaReservationGuard>(
+        svc.quota(), tkt.sessionId + ":http-down:zip",
+        infra::TransferFlow::HttpDown, tkt.size);
+    if (!quotaGuard->allowed()) {
+        res.status = 403;
+        res.set_content("{\"error\":\"quota_exceeded\"}", "application/json");
+        return;
+    }
 
     // V1.6.5 item A : émet 0% AVANT le content_provider (cf. streamFile).
     bus.post(core::TransferProgressEvent{
@@ -222,7 +272,7 @@ void streamZip(const DownloadTicket& tkt, WebService& svc,
     res.set_content_provider(
         tkt.size, "application/zip",
         [source, sessionId, doneEmitted,
-         lastProgressTime, lastProgressBytes, cancelFlag,
+         lastProgressTime, lastProgressBytes, cancelFlag, quotaGuard,
          totalSize, startTime, &bus, &svc](
             std::size_t /*offset*/, std::size_t length,
             httplib::DataSink& sink) {
@@ -253,6 +303,7 @@ void streamZip(const DownloadTicket& tkt, WebService& svc,
                 }
                 if (!*doneEmitted) {
                     bus.post(core::TransferDoneEvent{sessionId});
+                    quotaGuard->commit(source->bytesWritten());
                     *doneEmitted = true;
                 }
                 svc.releaseCancelFlag(sessionId);  // V1.6.5 item B
@@ -382,6 +433,15 @@ void registerDownload(WebService& svc) {
         std::strftime(ts, sizeof(ts), "%Y%m%d-%H%M%S", &tm);
         const std::string filename = "LocalTransfer-" + std::string(ts) + ".zip";
 
+        auto quotaGuard = std::make_shared<QuotaReservationGuard>(
+            svc.quota(), "bundle:" + token.substr(0, 12) + ":" + filename,
+            infra::TransferFlow::HttpDown, zipSize);
+        if (!quotaGuard->allowed()) {
+            res.status = 403;
+            res.set_content("{\"error\":\"quota_exceeded\"}", "application/json");
+            return;
+        }
+
         res.set_header("Content-Disposition",
             "attachment; filename*=UTF-8''" + rfc5987Encode(filename));
         res.set_header("Content-Length", std::to_string(zipSize));
@@ -389,10 +449,13 @@ void registerDownload(WebService& svc) {
 
         auto source = std::make_shared<StreamingZipSource>(std::move(entries));
         res.set_content_provider(zipSize, "application/zip",
-            [source](std::size_t /*offset*/, std::size_t length,
-                     httplib::DataSink& sink) {
+            [source, quotaGuard](std::size_t /*offset*/, std::size_t length,
+                                 httplib::DataSink& sink) {
                 const bool more = source->provide(sink, length);
-                if (!more && !source->errored()) sink.done();
+                if (!more && !source->errored()) {
+                    quotaGuard->commit(source->bytesWritten());
+                    sink.done();
+                }
                 return more && !source->errored();
             });
 

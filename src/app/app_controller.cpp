@@ -144,6 +144,35 @@ void AppController::start() {
     transferHistory_ = std::make_unique<infra::TransferHistory>(
         infra::Config::configDir() / "transfer_history.json");
     transferHistory_->load();
+    policyRepository_ = std::make_unique<infra::JsonPolicyRepository>(
+        infra::Config::configDir() / "business_policy.json");
+    policyService_ = std::make_unique<infra::PolicyService>(
+        *policyRepository_);
+    quotaRepository_ = std::make_unique<infra::JsonQuotaRepository>(
+        infra::Config::configDir() / "quota_usage.json");
+    quotaService_ = std::make_unique<infra::QuotaService>(
+        *quotaRepository_, *policyService_);
+
+    // Phase 2 — Portail Client Externe.
+    depositTokenGen_ = std::make_unique<infra::SecureRandomTokenGenerator>();
+    depositLinkRepo_ = std::make_unique<infra::JsonDepositLinkRepository>(
+        infra::Config::configDir() / "deposit_links.json");
+    depositLinkService_ = std::make_unique<infra::DepositLinkService>(
+        *depositLinkRepo_, *policyService_, *depositTokenGen_);
+    depositSessionRepo_ = std::make_unique<infra::JsonDepositSessionRepository>(
+        infra::Config::configDir() / "deposit_sessions.json");
+    depositHistoryRepo_ = std::make_unique<infra::JsonDepositHistoryRepository>(
+        infra::Config::configDir() / "deposit_history.json");
+    depositHistory_ = std::make_unique<infra::DepositHistoryStore>(
+        *depositHistoryRepo_);
+    depositHistory_->load();
+    // Réutilise selfFingerprint_ comme secret HMAC pour signer les reçus.
+    depositReceipts_ = std::make_unique<infra::DepositReceiptService>(
+        selfFingerprint_);
+    depositSessionService_ = std::make_unique<infra::DepositSessionService>(
+        *depositSessionRepo_, *depositLinkService_, *quotaService_,
+        *depositReceipts_, *depositHistory_, bus_,
+        cfg_.downloadDir / "Deposits");
 
     discovery_ = std::make_unique<network::DiscoveryService>(bus_, state_.self);
     server_    = std::make_unique<network::TransferServer>(
@@ -153,6 +182,14 @@ void AppController::start() {
         bus_, state_.self, knownPeers_.get());
     web_       = std::make_unique<web::WebService>(
         bus_, state_.self, cfg_.downloadDir, cfg_.webAnnounceTimeoutSec);
+    server_->setQuota(quotaService_.get());
+    client_->setQuota(quotaService_.get());
+    web_->setQuota(quotaService_.get());
+    web_->setTransferHistory(transferHistory_.get());
+    web_->setDepositLinkService(depositLinkService_.get());
+    web_->setDepositSessionService(depositSessionService_.get());
+    web_->setDepositReceiptService(depositReceipts_.get());
+    web_->setDepositHistory(depositHistory_.get());
     // V1.6.4 — Sprint Sécurité : active HTTPS via cert auto-signé
     // persisté dans le dossier de config (~/Library/Application Support/
     // LocalTransfer/ sur Mac).
@@ -759,6 +796,30 @@ AppController::WebShareInfo AppController::webShareInfo() const {
     return info;
 }
 
+infra::DepositResult<infra::DepositLink>
+AppController::createDepositLink(const infra::DepositLinkSpec& spec) {
+    if (!depositLinkService_) {
+        return infra::DepositResult<infra::DepositLink>::fail("not_found");
+    }
+    return depositLinkService_->create(spec);
+}
+
+bool AppController::revokeDepositLink(const std::string& id) {
+    if (!depositLinkService_) return false;
+    return depositLinkService_->revoke(id);
+}
+
+std::vector<infra::DepositLink> AppController::listDepositLinks() {
+    if (!depositLinkService_) return {};
+    return depositLinkService_->list();
+}
+
+std::vector<infra::DepositHistory::Entry>
+AppController::depositHistorySnapshot() {
+    if (!depositHistory_) return {};
+    return depositHistory_->snapshot();
+}
+
 void AppController::onEvent(const core::Event& ev) {
     std::visit([this](auto const& e) {
         using T = std::decay_t<decltype(e)>;
@@ -1019,6 +1080,17 @@ void AppController::onEvent(const core::Event& ev) {
         else if constexpr (std::is_same_v<T, core::LogEvent>) {
             state_.logTail.push_back("[" + e.level + "] " + e.message);
             while (state_.logTail.size() > 50) state_.logTail.pop_front();
+        }
+        else if constexpr (std::is_same_v<T, core::DepositReceivedEvent>) {
+            // Phase 2 — Notification temps réel : log + bandeau via LogEvent.
+            // L'UI desktop pourra binder un toast/notif dédié plus tard.
+            const std::string msg = "Nouveau dépôt — " + e.depositLinkLabel
+                + " (" + std::to_string(e.fileCount) + " fichiers, "
+                + std::to_string(e.totalBytes) + " octets) de "
+                + e.depositorName;
+            state_.logTail.push_back("[info] " + msg);
+            while (state_.logTail.size() > 50) state_.logTail.pop_front();
+            core::log_info("[deposit] " + msg);
         }
     }, ev);
 }

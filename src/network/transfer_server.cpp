@@ -4,6 +4,7 @@
 #include "ltr/core/types.hpp"
 #include "ltr/infra/filesystem_service.hpp"
 #include "ltr/infra/hash_service.hpp"
+#include "ltr/infra/quota_service.hpp"
 #include "ltr/infra/resume_sidecar.hpp"
 #include "ltr/network/protocol.hpp"
 
@@ -14,6 +15,42 @@
 namespace ltr::network {
 
 using namespace std::chrono;
+
+namespace {
+
+class QuotaReservationGuard {
+public:
+    QuotaReservationGuard(infra::TransferQuota* quota,
+                          std::string id,
+                          infra::TransferFlow flow,
+                          std::uint64_t expectedBytes)
+        : quota_(quota), id_(std::move(id)) {
+        if (!quota_) return;
+        decision_ = quota_->tryReserve(id_, flow, expectedBytes);
+        active_ = decision_.allowed;
+    }
+
+    ~QuotaReservationGuard() {
+        if (quota_ && active_) quota_->release(id_);
+    }
+
+    bool allowed() const noexcept { return decision_.allowed; }
+    const infra::QuotaDecision& decision() const noexcept { return decision_; }
+
+    void commit(std::uint64_t actualBytes) {
+        if (!quota_ || !active_) return;
+        quota_->commit(id_, actualBytes);
+        active_ = false;
+    }
+
+private:
+    infra::TransferQuota* quota_{nullptr};
+    std::string id_;
+    bool active_{false};
+    infra::QuotaDecision decision_;
+};
+
+} // namespace
 
 TransferServer::TransferServer(core::EventBus& bus,
                                domain::Device self,
@@ -189,6 +226,19 @@ void TransferServer::sessionWorker(std::unique_ptr<sf::TcpSocket> sock) {
 
     if (req.sessionId.empty() || req.files.empty()) {
         core::log_warn("TransferServer: OFFER incomplet");
+        return;
+    }
+
+    QuotaReservationGuard quotaGuard(
+        quota_, req.sessionId, infra::TransferFlow::TcpIn, req.totalSize());
+    if (!quotaGuard.allowed()) {
+        json r = {{"sessionId", req.sessionId},
+                  {"reason", quotaGuard.decision().reason.empty()
+                       ? "quota_exceeded" : quotaGuard.decision().reason}};
+        writeJsonFrame(*sock, MessageType::Reject, r.dump());
+        bus_.post(core::TransferFailedEvent{
+            req.sessionId, r["reason"].get<std::string>(),
+            core::ErrorCategory::Permanent});
         return;
     }
 
@@ -419,6 +469,7 @@ void TransferServer::sessionWorker(std::unique_ptr<sf::TcpSocket> sock) {
         done.type == MessageType::Done) {
         // V1.1.9 : session complète → supprimer le sidecar.
         infra::deleteSidecar(downloadDir_, req.sessionId);
+        quotaGuard.commit(session.bytesTransferred());
         bus_.post(core::TransferDoneEvent{req.sessionId});
     } else {
         bus_.post(core::TransferFailedEvent{req.sessionId, "DONE non reçu",

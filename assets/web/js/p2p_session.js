@@ -206,6 +206,33 @@
     }, patch || {}));
   }
 
+  function buildSessionMeta(state) {
+    return {
+      kind: 'session-meta',
+      sessionId: state.sessionId,
+      count: state.files.length,
+      totalBytes: state.totalBytes,
+      bundleKind: state.bundle && state.bundle.kind,
+      bundleName: state.bundle && state.bundle.name,
+      bundleFileCount: state.bundle && state.bundle.fileCount,
+    };
+  }
+
+  function buildFileMeta(state, file) {
+    return {
+      kind: 'file-meta',
+      sessionId: state.sessionId,
+      name: file.name,
+      size: file.size,
+      type: file.type || 'application/octet-stream',
+      relativePath: file.webkitRelativePath || file.name,
+      idx:  state.currentFileIdx,
+      fileId: state.sessionId + ':' + state.currentFileIdx,
+      stableFileId: stableFileId(file),
+      lastModified: file.lastModified || 0,
+    };
+  }
+
   function wireSenderDc(dc, state) {
     state.chunkSize = state.chunkSize || CHUNK_SIZE;
     state.bufferHigh = state.bufferHigh || BUFFER_HIGH;
@@ -314,15 +341,7 @@
 
     if (state.currentFileIdx === 0) {
       state.sessionId = state.sessionId || makeSessionId();
-      const summary = {
-        kind: 'session-meta',
-        sessionId: state.sessionId,
-        count: state.files.length,
-        totalBytes: state.totalBytes,
-        bundleKind: state.bundle && state.bundle.kind,
-        bundleName: state.bundle && state.bundle.name,
-        bundleFileCount: state.bundle && state.bundle.fileCount,
-      };
+      const summary = buildSessionMeta(state);
       if (!await safeSend(state, JSON.stringify(summary), 'session-meta')) {
         fs.status = 'failed'; fs.error = 'session-meta';
         syncFileStatus(state, fs);
@@ -330,18 +349,7 @@
         return;
       }
     }
-    const meta = {
-      kind: 'file-meta',
-      sessionId: state.sessionId,
-      name: file.name,
-      size: file.size,
-      type: file.type || 'application/octet-stream',
-      relativePath: file.webkitRelativePath || file.name,
-      idx:  state.currentFileIdx,
-      fileId: state.sessionId + ':' + state.currentFileIdx,
-      stableFileId: stableFileId(file),
-      lastModified: file.lastModified || 0,
-    };
+    const meta = buildFileMeta(state, file);
     fs.fileId = meta.fileId;
     fs.stableFileId = meta.stableFileId;
     if (!await safeSend(state, JSON.stringify(meta), 'file-meta')) {
@@ -735,6 +743,14 @@
     return ZIP_CRC_TABLE;
   }
 
+  function crc32Update(crc, bytes) {
+    const table = crcTable();
+    for (let i = 0; i < bytes.length; i++) {
+      crc = table[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
+    }
+    return crc >>> 0;
+  }
+
   async function crc32Blob(blob) {
     const table = crcTable();
     let crc = 0xffffffff;
@@ -798,19 +814,118 @@
     return new Blob(parts, { type: 'application/zip' });
   }
 
+  async function makeZipBlobOpfs(files, zipName) {
+    if (!OPFS_AVAILABLE || !navigator.storage || !navigator.storage.getDirectory) {
+      return null;
+    }
+    if (files.length > 0xffff) throw new Error('zip32_too_many_files');
+    const root = await navigator.storage.getDirectory();
+    const opfsName = 'ltr-zip-' + Date.now().toString(36)
+      + '-' + Math.random().toString(36).slice(2, 8);
+    const handle = await root.getFileHandle(opfsName, { create: true });
+    const writable = await handle.createWritable({ keepExistingData: false });
+    const central = [];
+    let offset = 0;
+
+    async function writePart(part) {
+      await writable.write(part);
+      offset += part.size || part.byteLength || part.length || 0;
+    }
+
+    try {
+      for (const item of files) {
+        if (item.blob.size > 0xffffffff) {
+          throw new Error('zip32_file_too_large');
+        }
+        const localOffset = offset;
+        const nameBytes = ZIP_ENCODER.encode(zipPath(item.name));
+        const header = [
+          zipU32(0x04034b50), zipU16(20), zipU16(0x0808), zipU16(0),
+          zipU16(0), zipU16(0), zipU32(0), zipU32(0), zipU32(0),
+          zipU16(nameBytes.length), zipU16(0), nameBytes,
+        ];
+        for (const p of header) await writePart(p);
+
+        let crc = 0xffffffff;
+        const reader = item.blob.stream().getReader();
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          crc = crc32Update(crc, value);
+          await writePart(value);
+        }
+        crc = (crc ^ 0xffffffff) >>> 0;
+
+        const desc = [
+          zipU32(0x08074b50), zipU32(crc),
+          zipU32(item.blob.size), zipU32(item.blob.size),
+        ];
+        for (const p of desc) await writePart(p);
+        central.push(...[
+          zipU32(0x02014b50), zipU16(20), zipU16(20), zipU16(0x0808),
+          zipU16(0), zipU16(0), zipU16(0), zipU32(crc),
+          zipU32(item.blob.size), zipU32(item.blob.size),
+          zipU16(nameBytes.length), zipU16(0), zipU16(0), zipU16(0),
+          zipU16(0), zipU32(0), zipU32(localOffset), nameBytes,
+        ]);
+      }
+
+      const centralStart = offset;
+      for (const p of central) await writePart(p);
+      const centralSize = offset - centralStart;
+      if (offset > 0xffffffff || centralSize > 0xffffffff) {
+        throw new Error('zip32_too_large');
+      }
+      const eocd = [
+        zipU32(0x06054b50), zipU16(0), zipU16(0),
+        zipU16(files.length), zipU16(files.length),
+        zipU32(centralSize), zipU32(centralStart), zipU16(0),
+      ];
+      for (const p of eocd) await writePart(p);
+      await writable.close();
+      return {
+        blob: await handle.getFile(),
+        opfsName,
+        name: zipName || 'dossier.zip',
+      };
+    } catch (e) {
+      try { await writable.close(); } catch {}
+      try { await root.removeEntry(opfsName); } catch {}
+      throw e;
+    }
+  }
+
   async function downloadReceivedFolderZip(state) {
     const files = state.bundleFiles || [];
     if (files.length === 0) return;
     setSessionUiState(state, 'Création ZIP…');
-    const zip = await makeZipBlob(files);
+    const zipName = (state.bundle.name || 'dossier') + '.zip';
+    let zipOpfsName = null;
+    let zip;
+    const opfsZip = await makeZipBlobOpfs(files, zipName);
+    if (opfsZip) {
+      zip = opfsZip.blob;
+      zipOpfsName = opfsZip.opfsName;
+    } else {
+      zip = await makeZipBlob(files);
+    }
     const url = URL.createObjectURL(zip);
     const a = document.createElement('a');
     a.href = url;
-    a.download = (state.bundle.name || 'dossier') + '.zip';
+    a.download = zipName;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 2000);
+    if (window.LTR.webInbox && window.LTR.webInbox.addBlob) {
+      window.LTR.webInbox.addBlob({
+        name: zipName,
+        size: zip.size,
+        kind: 'folder',
+        from: state.peer ? state.peer.displayName : 'P2P',
+        fileCount: files.length,
+      }, zip).catch(() => {});
+    }
     if (OPFS_AVAILABLE) {
       setTimeout(async () => {
         try {
@@ -819,6 +934,9 @@
             if (item.opfsName) {
               try { await root.removeEntry(item.opfsName); } catch {}
             }
+          }
+          if (zipOpfsName) {
+            try { await root.removeEntry(zipOpfsName); } catch {}
           }
         } catch {}
       }, 5000);
@@ -907,6 +1025,14 @@
       a.click();
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 2000);
+      if (window.LTR.webInbox && window.LTR.webInbox.addBlob) {
+        window.LTR.webInbox.addBlob({
+          name: cur.name || 'download',
+          size: blob.size,
+          kind: 'file',
+          from: state.peer ? state.peer.displayName : 'P2P',
+        }, blob).catch(() => {});
+      }
     }
 
     // Cleanup OPFS handle après download.
@@ -1104,6 +1230,9 @@
     }
     const isSuccess = label && label.startsWith('✓');
     if (!isSuccess) failOpenFileStatuses(state, label);
+    if (!isSuccess && label && ui() && ui().showDiagnostic) {
+      ui().showDiagnostic(label);
+    }
     if (state.ttlTimer)        clearTimeout(state.ttlTimer);
     if (state.connectTimer)    clearTimeout(state.connectTimer);
     if (state.senderTtl)       clearTimeout(state.senderTtl);
@@ -1149,5 +1278,10 @@
     ACK_INTERVAL_MS, NO_ACK_TIMEOUT_MS,
     WATCHDOG_NO_DATA_MS, DRAIN_TIMEOUT_MS,
     hasStorageRoom,
+  };
+  window.LTR.p2pSessionTest = {
+    buildSessionMeta,
+    buildFileMeta,
+    zipPath,
   };
 })();
