@@ -12,6 +12,27 @@
   const signedOut = params.get('signed_out') === '1';
   const CUSTOM_NAME_KEY = 'ltr_custom_name';
 
+  // Phase 3 — UX cert auto-signé : bascule HTTPS au submit, pas au scan.
+  // serverInfo est fetché en arrière-plan ; au moment du submit, si
+  // protocol === 'http:' ET requireHttps=true, on redirige vers HTTPS
+  // avec ?pin=&autologin=1 pour que la page HTTPS finisse le login.
+  let serverInfo = null;
+  fetch('/api/server-info')
+    .then((r) => r.ok ? r.json() : null)
+    .then((j) => { serverInfo = j; })
+    .catch(() => {});
+
+  function maybeUpgradeToHttps(pin) {
+    if (window.location.protocol === 'https:') return false;
+    if (!serverInfo || !serverInfo.requireHttps) return false;
+    if (!serverInfo.httpsPort) return false;
+    const host = window.location.hostname;
+    const target = 'https://' + host + ':' + serverInfo.httpsPort
+      + '/login?pin=' + encodeURIComponent(pin) + '&autologin=1';
+    window.location.href = target;
+    return true;
+  }
+
   // ---------- device_id stable (localStorage) ----------
   function uuidv4() {
     // Fallback simple sans dépendance crypto.subtle (OK mobile safari).
@@ -220,6 +241,11 @@
       showError('Veuillez saisir les 6 chiffres.');
       return;
     }
+    // Phase 3 — UX cert auto-signé : si on est en HTTP et que la policy
+    // exige HTTPS, bascule maintenant. L'alerte cert s'affiche une fois,
+    // l'utilisateur accepte, et le login finit en HTTPS (autologin=1).
+    if (maybeUpgradeToHttps(pin)) return;
+
     const device_id = getDeviceId();
     const remember = !!($('#opt-remember') && $('#opt-remember').checked);
     const rememberPin = !!(optPin && optPin.checked && !optPin.disabled);

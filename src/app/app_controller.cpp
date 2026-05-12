@@ -31,23 +31,13 @@ std::string lastPathComponent(const std::filesystem::path& p) {
     return name.empty() ? p.string() : name;
 }
 
-std::string hostFromUrl(const std::string& url) {
-    const auto scheme = url.find("://");
-    const auto start = scheme == std::string::npos ? 0 : scheme + 3;
-    const auto end = url.find('/', start);
-    return url.substr(start, end == std::string::npos ? std::string::npos
-                                                      : end - start);
-}
-
+// Phase 3 — UX cert auto-signé : on retourne TOUJOURS l'URL HTTP pour
+// que le QR scan ne déclenche pas l'alerte cert au premier contact.
+// Le frontend (login.js) bascule en HTTPS au moment du submit PIN si
+// requireHttps=true. L'alerte cert apparaît UNE seule fois, à l'action
+// sensible, pas au scan.
 std::string preferredWebBaseUrl(const web::WebService& web) {
-    const auto http = web.localUrl();
-    if (http.empty()) return {};
-    if (web.portHttps() == 0) return http;
-    const auto host = hostFromUrl(http);
-    const auto colon = host.rfind(':');
-    const auto ip = colon == std::string::npos ? host : host.substr(0, colon);
-    if (ip.empty()) return http;
-    return "https://" + ip + ":" + std::to_string(web.portHttps());
+    return web.localUrl();
 }
 
 std::string webLoginUrl(const web::WebService& web) {
