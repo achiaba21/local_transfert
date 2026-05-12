@@ -207,6 +207,10 @@ add_library(ltr_core STATIC
     src/infra/deposit_history.cpp
     src/infra/deposit_receipt.cpp
     src/infra/deposit_token_generator.cpp
+    # Phase 3 — Contrôle IT.
+    src/infra/cidr_matcher.cpp
+    src/infra/policy_enforcement.cpp
+    src/infra/retention_service.cpp
     src/infra/known_peers.cpp        # V1.6.4 — Wave 2 TOFU TCP
     src/infra/crypto_identity.cpp    # V1.6.4 — Wave 2 TOFU TCP
     src/infra/peers_history.cpp      # V1.6.5 — Wave 4 item J
@@ -236,6 +240,7 @@ add_library(ltr_core STATIC
     src/web/routes/history_routes.cpp
     src/web/routes/deposit_routes.cpp        # Phase 2
     src/web/routes/deposit_admin_routes.cpp  # Phase 2
+    src/web/routes/policy_middleware.cpp     # Phase 3
     src/web/routes/p2p_routes.cpp
     src/web/routes/self_routes.cpp
     src/web/routes/share_routes.cpp

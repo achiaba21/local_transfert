@@ -134,6 +134,19 @@ add_test(NAME deposit_routes COMMAND test_deposit_routes)
 set_tests_properties(deposit_routes PROPERTIES
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+# Phase 3 — Contrôle IT.
+add_executable(test_cidr_matcher test_cidr_matcher.cpp)
+target_link_libraries(test_cidr_matcher PRIVATE ltr_core)
+add_test(NAME cidr_matcher COMMAND test_cidr_matcher)
+
+add_executable(test_policy_enforcement test_policy_enforcement.cpp)
+target_link_libraries(test_policy_enforcement PRIVATE ltr_core)
+add_test(NAME policy_enforcement COMMAND test_policy_enforcement)
+
+add_executable(test_retention_service test_retention_service.cpp)
+target_link_libraries(test_retention_service PRIVATE ltr_core)
+add_test(NAME retention_service COMMAND test_retention_service)
+
 # V1.1.10 — Sprint UI Layout System : DSL HBox/VBox + breakpoints + cache.
 add_executable(test_layout_box test_layout_box.cpp)
 target_link_libraries(test_layout_box PRIVATE ltr_ui)

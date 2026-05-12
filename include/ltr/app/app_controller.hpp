@@ -24,7 +24,9 @@
 #include "ltr/infra/deposit_token_generator.hpp"
 #include "ltr/infra/known_peers.hpp"
 #include "ltr/infra/peers_history.hpp"      // V1.6.5 — Wave 4 item J
+#include "ltr/infra/policy_enforcement.hpp" // Phase 3 — Contrôle IT
 #include "ltr/infra/quota_service.hpp"
+#include "ltr/infra/retention_service.hpp"  // Phase 3 — Contrôle IT
 #include "ltr/infra/transfer_history.hpp"   // V1.6.5 — Wave 4 item K
 #include "ltr/network/discovery_service.hpp"
 #include "ltr/network/transfer_client.hpp"
@@ -165,6 +167,10 @@ private:
     std::unique_ptr<infra::DepositHistoryStore>          depositHistory_;
     std::unique_ptr<infra::DepositReceiptService>        depositReceipts_;
     std::unique_ptr<infra::DepositSessionService>        depositSessionService_;
+    // Phase 3 — Contrôle IT.
+    std::unique_ptr<infra::PolicyEnforcementService>     policyEnforcement_;
+    std::unique_ptr<infra::RetentionService>             retentionService_;
+    std::thread                                          retentionThread_;
     // Cache totalBytes par sessionId pour calculer le delta sur Done/Failed.
     std::unordered_map<std::string, std::uint64_t> sessionBytes_;
 

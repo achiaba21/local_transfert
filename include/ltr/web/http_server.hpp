@@ -7,7 +7,11 @@
 #include <string>
 #include <thread>
 
-namespace httplib { class Server; }
+namespace httplib {
+class Server;
+struct Request;
+struct Response;
+}
 
 namespace ltr::web {
 
@@ -41,6 +45,18 @@ public:
 
     std::uint16_t port() const noexcept { return port_.load(); }
     bool running()  const noexcept { return running_.load(); }
+
+    // Phase 3 — Contrôle IT. Enregistre un handler exécuté AVANT le
+    // routing standard. Si le handler renvoie httplib::Server::
+    // HandlerResponse::Handled, la requête est court-circuitée.
+    // À appeler avant start().
+    //
+    // Signature alignée sur cpp-httplib : la fonction reçoit
+    // request+response et retourne un int qui sera mappé sur Handled
+    // (= 1) ou Unhandled (= 0).
+    void setPreRoutingHandler(
+        std::function<int(const httplib::Request&,
+                          httplib::Response&)> handler);
 
 private:
     std::unique_ptr<httplib::Server> server_;

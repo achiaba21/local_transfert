@@ -25,6 +25,7 @@ class DepositLinkService;
 class DepositSessionService;
 class DepositReceiptService;
 class DepositHistoryStore;
+class PolicyEnforcementService;
 }
 
 namespace ltr::web {
@@ -75,6 +76,10 @@ public:
     }
     void setDepositHistory(infra::DepositHistoryStore* store) noexcept {
         depositHistory_ = store;
+    }
+    // Phase 3 — Contrôle IT.
+    void setPolicyEnforcement(infra::PolicyEnforcementService* p) noexcept {
+        policy_ = p;
     }
 
     // Envoi host → browser. Crée N tickets et émet un SSE 'files-offer'
@@ -135,6 +140,7 @@ public:
     infra::DepositSessionService* depositSessions() { return depositSessions_; }
     infra::DepositReceiptService* depositReceipts() { return depositReceipts_; }
     infra::DepositHistoryStore*   depositHistory()  { return depositHistory_; }
+    infra::PolicyEnforcementService* policyEnforcement() { return policy_; }
     core::EventBus&       bus()         { return bus_; }
     HttpServer&           httpServer()  { return server_; }
     const domain::Device& self()  const { return self_; }
@@ -178,6 +184,7 @@ private:
     infra::DepositSessionService* depositSessions_{nullptr};
     infra::DepositReceiptService* depositReceipts_{nullptr};
     infra::DepositHistoryStore*   depositHistory_{nullptr};
+    infra::PolicyEnforcementService* policy_{nullptr};
 
     std::string           accessPin_;
     std::atomic<std::uint16_t> port_{0};

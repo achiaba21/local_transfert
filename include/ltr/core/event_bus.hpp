@@ -30,11 +30,12 @@ struct TransferDoneEvent   { std::string sessionId; };
 // V1.1.9 — Sprint Transfer Resume : classification des erreurs pour
 // décider du comportement UI (resumable, auto-retry, etc.).
 enum class ErrorCategory : std::uint8_t {
-    Unknown   = 0,   // safe default — traité comme resumable
-    Network   = 1,   // TCP disconnect, timeout, heartbeat miss → resumable + auto-retry
-    Protocol  = 2,   // frame invalide, crc mismatch → resumable + retry 1×
-    Permanent = 3,   // disk full, perm denied → pas de resume
-    Cancelled = 4,   // user cancel → pas de resume
+    Unknown      = 0,   // safe default — traité comme resumable
+    Network      = 1,   // TCP disconnect, timeout, heartbeat miss → resumable + auto-retry
+    Protocol     = 2,   // frame invalide, crc mismatch → resumable + retry 1×
+    Permanent    = 3,   // disk full, perm denied → pas de resume
+    Cancelled    = 4,   // user cancel → pas de resume
+    PolicyDenied = 5,   // Phase 3 — refus par policy IT (HTTPS / CIDR / P2P) — pas de resume
 };
 
 struct TransferFailedEvent {

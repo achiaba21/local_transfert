@@ -153,6 +153,12 @@ void AppController::start() {
     quotaService_ = std::make_unique<infra::QuotaService>(
         *quotaRepository_, *policyService_);
 
+    // Phase 3 — Contrôle IT.
+    policyEnforcement_ = std::make_unique<infra::PolicyEnforcementService>(
+        *policyService_);
+    retentionService_ = std::make_unique<infra::RetentionService>(
+        *policyEnforcement_, cfg_.downloadDir);
+
     // Phase 2 — Portail Client Externe.
     depositTokenGen_ = std::make_unique<infra::SecureRandomTokenGenerator>();
     depositLinkRepo_ = std::make_unique<infra::JsonDepositLinkRepository>(
@@ -190,6 +196,7 @@ void AppController::start() {
     web_->setDepositSessionService(depositSessionService_.get());
     web_->setDepositReceiptService(depositReceipts_.get());
     web_->setDepositHistory(depositHistory_.get());
+    web_->setPolicyEnforcement(policyEnforcement_.get());
     // V1.6.4 — Sprint Sécurité : active HTTPS via cert auto-signé
     // persisté dans le dossier de config (~/Library/Application Support/
     // LocalTransfer/ sur Mac).
@@ -205,11 +212,38 @@ void AppController::start() {
     ensureClipboardTempDir(cbDir);
     purgeOldClipboardTemp(cbDir);
 
+    // Phase 3 — Contrôle IT : purge initiale puis thread périodique.
+    if (retentionService_) {
+        const auto nowSec =
+            std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+        retentionService_->purgeHistories(*peersHistory_, nowSec);
+        retentionService_->purgeReceivedFiles(nowSec);
+
+        retentionThread_ = std::thread([this]() {
+            while (!shuttingDown_.load()) {
+                // Sleep par tranches de 1 s pour permettre un shutdown rapide.
+                for (int i = 0; i < 24 * 3600 && !shuttingDown_.load(); ++i) {
+                    std::this_thread::sleep_for(std::chrono::seconds(1));
+                }
+                if (shuttingDown_.load()) break;
+                if (!retentionService_ || !peersHistory_) continue;
+                const auto sec =
+                    std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::system_clock::now().time_since_epoch())
+                            .count();
+                retentionService_->purgeHistories(*peersHistory_, sec);
+                retentionService_->purgeReceivedFiles(sec);
+            }
+        });
+    }
+
     core::log_info("AppController démarré — device_id=" + cfg_.deviceId);
 }
 
 void AppController::stop() {
     shuttingDown_.store(true);
+    if (retentionThread_.joinable()) retentionThread_.join();
     if (discovery_) discovery_->stop();
     if (server_)    server_->stop();
     if (web_)       web_->stop();

@@ -134,4 +134,17 @@ void HttpServer::stop() {
     port_.store(0);
 }
 
+void HttpServer::setPreRoutingHandler(
+    std::function<int(const httplib::Request&, httplib::Response&)> handler) {
+    if (!server_) return;
+    server_->set_pre_routing_handler(
+        [h = std::move(handler)](const httplib::Request& req,
+                                  httplib::Response& res) {
+            const int v = h(req, res);
+            return (v != 0)
+                ? httplib::Server::HandlerResponse::Handled
+                : httplib::Server::HandlerResponse::Unhandled;
+        });
+}
+
 } // namespace ltr::web

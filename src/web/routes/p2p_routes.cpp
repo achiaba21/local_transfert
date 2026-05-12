@@ -4,9 +4,10 @@
 #include <nlohmann/json.hpp>
 
 #include "ltr/core/logger.hpp"
+#include "ltr/web/routes/multi_server.hpp"
+#include "ltr/web/routes/policy_middleware.hpp"
 #include "ltr/web/routes/route_helpers.hpp"
 #include "ltr/web/web_service.hpp"
-#include "ltr/web/routes/multi_server.hpp"
 
 namespace ltr::web::routes {
 
@@ -34,6 +35,9 @@ void registerP2P(WebService& svc) {
     // - 204 : routé avec succès
     server.Post("/api/p2p/signal", [&svc](const httplib::Request& req,
                                            httplib::Response& res) {
+        // Phase 3 — Contrôle IT : refus si policy désactive P2P.
+        if (rejectIfP2PDisabled(svc, req, res)) return;
+
         // 1. Auth expéditeur via cookie
         const auto fromToken = readTokenCookie(req);
         const auto fromSess = svc.sessions().validate(fromToken);

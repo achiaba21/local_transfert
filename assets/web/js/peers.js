@@ -21,11 +21,34 @@
   let selfInfo = null;
   let pendingTargetDeviceId = null;
   let onPeerClickedCb = null;
+  let p2pDisabledByPolicy = false;  // Phase 3 — Contrôle IT
+
+  // Phase 3 — fetch des flags policy une fois auth (peers.js init après login).
+  // Si allowP2P=false, la section P2P est masquée et aucun clic n'est routé.
+  fetch('/api/policy/flags', { credentials: 'same-origin' })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((j) => {
+      if (!j) return;
+      if (j.allowP2P === false) {
+        p2pDisabledByPolicy = true;
+        const sec = document.querySelector('.peers-section');
+        if (sec) {
+          sec.hidden = true;
+          sec.setAttribute('data-policy-locked', 'true');
+        }
+      }
+    })
+    .catch(() => {});
 
   const CUSTOM_NAME_KEY = 'ltr_custom_name';
 
   function render() {
     if (!listEl) return;
+    if (p2pDisabledByPolicy) {
+      const sec = $('.peers-section');
+      if (sec) sec.hidden = true;
+      return;
+    }
     renderSelf();
     if (peers.length === 0 && !selfInfo) {
       listEl.innerHTML = '';
