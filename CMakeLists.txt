@@ -51,38 +51,41 @@ ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/html/index.html
                IndexHtml "text/html; charset=utf-8" index_html)
 ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/html/login.html
                LoginHtml "text/html; charset=utf-8" login_html)
-ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/app.js
+# JS organisés par responsabilité (SRP) :
+#   pages/       entry-points par page HTML
+#   core/        helpers sans dépendance domaine
+#   dashboard/   modules du dashboard host
+#   p2p/         module WebRTC isolé
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/pages/dashboard.js
                AppJs "application/javascript; charset=utf-8" app_js)
-ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/common.js
-               CommonJs "application/javascript; charset=utf-8" common_js)
-ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/upload.js
-               UploadJs "application/javascript; charset=utf-8" upload_js)
-ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/download.js
-               DownloadJs "application/javascript; charset=utf-8" download_js)
-ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/peers.js
-               PeersJs "application/javascript; charset=utf-8" peers_js)
-ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/p2p.js
-               P2pJs "application/javascript; charset=utf-8" p2p_js)
-ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/p2p_transport.js
-               P2pTransportJs "application/javascript; charset=utf-8" p2p_transport_js)
-ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/p2p_session.js
-               P2pSessionJs "application/javascript; charset=utf-8" p2p_session_js)
-ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/p2p_ui.js
-               P2pUiJs "application/javascript; charset=utf-8" p2p_ui_js)
-ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/transfer_registry.js
-               TransferRegistryJs "application/javascript; charset=utf-8" transfer_registry_js)
-ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/share.js
-               ShareJs "application/javascript; charset=utf-8" share_js)
-# V1.6.5 — Wave 2 item E : wrapper IndexedDB minimal
-ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/idb.js
-               IdbJs "application/javascript; charset=utf-8" idb_js)
-ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/web_profile.js
-               WebProfileJs "application/javascript; charset=utf-8" web_profile_js)
-# V1.6.5 — Wave 3 item I : stockage chiffré du PIN (WebCrypto AES-GCM)
-ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/pin_storage.js
-               PinStorageJs "application/javascript; charset=utf-8" pin_storage_js)
-ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/login.js
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/pages/login.js
                LoginJs "application/javascript; charset=utf-8" login_js)
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/core/common.js
+               CommonJs "application/javascript; charset=utf-8" common_js)
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/core/idb.js
+               IdbJs "application/javascript; charset=utf-8" idb_js)
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/core/pin_storage.js
+               PinStorageJs "application/javascript; charset=utf-8" pin_storage_js)
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/core/web_profile.js
+               WebProfileJs "application/javascript; charset=utf-8" web_profile_js)
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/core/transfer_registry.js
+               TransferRegistryJs "application/javascript; charset=utf-8" transfer_registry_js)
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/dashboard/upload.js
+               UploadJs "application/javascript; charset=utf-8" upload_js)
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/dashboard/download.js
+               DownloadJs "application/javascript; charset=utf-8" download_js)
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/dashboard/peers.js
+               PeersJs "application/javascript; charset=utf-8" peers_js)
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/dashboard/share.js
+               ShareJs "application/javascript; charset=utf-8" share_js)
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/p2p/index.js
+               P2pJs "application/javascript; charset=utf-8" p2p_js)
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/p2p/transport.js
+               P2pTransportJs "application/javascript; charset=utf-8" p2p_transport_js)
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/p2p/session.js
+               P2pSessionJs "application/javascript; charset=utf-8" p2p_session_js)
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/p2p/ui.js
+               P2pUiJs "application/javascript; charset=utf-8" p2p_ui_js)
 ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/css/style.css
                StyleCss "text/css; charset=utf-8" style_css)
 # Phase 2 — Portail Client Externe.
@@ -92,9 +95,9 @@ ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/html/deposit_expired.html
                DepositExpiredHtml "text/html; charset=utf-8" deposit_expired_html)
 ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/html/deposit_receipt.html
                DepositReceiptHtml "text/html; charset=utf-8" deposit_receipt_html)
-ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/deposit.js
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/pages/deposit.js
                DepositJs "application/javascript; charset=utf-8" deposit_js)
-ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/host_deposit_links.js
+ltr_embed_file(${CMAKE_SOURCE_DIR}/assets/web/js/dashboard/host_deposit_links.js
                HostDepositLinksJs "application/javascript; charset=utf-8" host_deposit_links_js)
 
 # V1.6.6+ — Polices Geist copiées dans le dossier de build (cohérence
@@ -219,6 +222,7 @@ add_library(ltr_core STATIC
     # --- couche web ---
     src/web/http_server.cpp
     src/web/web_service.cpp
+    src/web/static_asset_registry.cpp
     src/web/web_session_store.cpp
     src/web/display_name.cpp
     src/web/cert_manager.cpp

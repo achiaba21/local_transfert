@@ -23,8 +23,8 @@ function load(rel) {
   vm.runInThisContext(code, { filename: rel });
 }
 
-load('assets/web/js/upload.js');
-load('assets/web/js/p2p_session.js');
+load('assets/web/js/dashboard/upload.js');
+load('assets/web/js/p2p/session.js');
 
 const files = [
   { name: 'b.jpg', size: 20, lastModified: 2, webkitRelativePath: 'Photos/sub/b.jpg' },
